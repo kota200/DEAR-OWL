@@ -1,0 +1,7 @@
+*.data binary
+*.data.gz binary
+*.gz binary
+*.so binary
+*.wasm binary
+*.ttf binary
+*.png binary

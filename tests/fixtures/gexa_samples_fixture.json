@@ -1,0 +1,28 @@
+{
+  "samples": [
+    {
+      "sample_id": "SRR001",
+      "SRA": "SRR001",
+      "BioProject": "PRJNA1",
+      "tissue": "leaf",
+      "treatment": "control",
+      "cultivar": "Tift"
+    },
+    {
+      "sample_id": "SRR002",
+      "SRA": "SRR002",
+      "BioProject": "PRJNA1",
+      "tissue": "root",
+      "treatment": "heat",
+      "cultivar": "Tift"
+    },
+    {
+      "sample_id": "SRR003",
+      "SRA": "SRR003",
+      "BioProject": "PRJNA2",
+      "tissue": "leaf",
+      "treatment": "heat",
+      "cultivar": "LineA"
+    }
+  ]
+}

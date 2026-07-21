@@ -1,0 +1,6 @@
+Place the complete webR browser distribution here.
+
+At minimum, the following URL must work:
+  ./webr/webr.js
+
+Keep all files and directories from the webR distribution together.

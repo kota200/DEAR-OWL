@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
+  >
+  <title>Help | DEG on Web</title>
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260721-help">
+</head>
+<body class="help-page">
+  <header class="site-header">
+    <div>
+      <h1>DEG on Web</h1>
+      <p>Analyze differential gene expression from GExA-style datasets or uploaded count matrices.</p>
+    </div>
+    <nav aria-label="Primary">
+      <a href="./index.html">Home</a>
+      <a href="./help.html" aria-current="page">Help</a>
+    </nav>
+  </header>
+
+  <main class="app-shell help-manual">
+    <section class="step-card help-intro">
+      <div class="step-head">
+        <h2>Manual</h2>
+      </div>
+      <p class="manual-lead">DEG on Web performs two-group differential gene expression analysis in the browser.</p>
+      <p>Use this page to prepare input data, select samples, set parameters, run the analysis, and interpret the output.</p>
+    </section>
+
+    <section class="step-card">
+      <div class="step-head">
+        <h2>Contents</h2>
+      </div>
+      <ol class="manual-toc">
+        <li><a href="#what-you-need">Requirements</a></li>
+        <li><a href="#page-layout">Page layout</a></li>
+        <li><a href="#workflow">Step-by-step workflow</a></li>
+        <li><a href="#sample-selection">Sample selection and BioProject checks</a></li>
+        <li><a href="#parameters">Set analysis parameters</a></li>
+        <li><a href="#results">Results and downloads</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ol>
+    </section>
+
+    <section id="what-you-need" class="step-card">
+      <div class="step-head">
+        <h2>Requirements</h2>
+      </div>
+      <ul class="manual-list">
+        <li><strong>Input data</strong>: Select a GExA dataset or upload a raw count matrix. The first column should contain gene IDs. The remaining columns should contain sample counts.</li>
+        <li><strong>Two sample groups</strong>: Select control samples and treatment samples. At least two samples are required per group. Three or more biological replicates are recommended.</li>
+        <li><strong>Comparable conditions</strong>: As a rule, compare samples within the same BioProject. The main difference between groups should be the treatment or condition of interest.</li>
+        <li><strong>Browser resources</strong>: The analysis runs locally in the browser. Large datasets may require more time and memory.</li>
+      </ul>
+      <p class="manual-note">DESeq2 uses raw integer counts for statistical testing. TPM values may be shown as expression context, but they are not used for differential expression testing.</p>
+    </section>
+
+    <section id="page-layout" class="step-card">
+      <div class="step-head">
+        <h2>Page Layout</h2>
+      </div>
+      <div class="manual-two-column">
+        <div>
+          <h3>Control Panel</h3>
+          <p>Steps 1 to 6 define the analysis. Select data, choose samples, set parameters, select plots, and start the run.</p>
+        </div>
+        <div>
+          <h3>Status Strip</h3>
+          <p>The status strip shows progress, estimated memory use, and the webR runtime state.</p>
+        </div>
+        <div>
+          <h3>Sample Tables</h3>
+          <p>The control and treatment tables allow sample search, metadata filtering, and sample selection.</p>
+        </div>
+        <div>
+          <h3>Results Area</h3>
+          <p>After analysis, Step 7 shows summary values, the result table, plots, download files, and the analysis log.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow" class="step-card">
+      <div class="step-head">
+        <h2>Step-by-step Workflow</h2>
+      </div>
+      <ol class="workflow-list">
+        <li>Open the Home page. In Step 1, select <strong>GExA dataset</strong> or <strong>Upload count matrix</strong>.</li>
+        <li>If using a GExA dataset, choose a dataset from the dropdown menu and check the dataset information.</li>
+        <li>If uploading a count matrix, select a CSV, TSV, TXT, or gzip file. Count values must be non-negative integers.</li>
+        <li>In Step 2, select control samples. In principle, select samples from one BioProject and keep tissue, stage, and cultivar consistent.</li>
+        <li>In Step 3, select treatment samples that match the control background conditions.</li>
+        <li>If sample information is unclear, check the BioProject, BioSample, or SRA record. If possible, trace the BioProject accession to the original publication before running the analysis.</li>
+        <li>In Step 4, set the analysis engine and thresholds. A useful starting point is DESeq2, FDR 0.05, and absolute log2 fold change 1.</li>
+        <li>In Step 5, select plots. MA and volcano plots are usually useful. PCA and heatmap plots may be slower for large datasets.</li>
+        <li>Check any warnings. Then click <strong>Run DEG analysis</strong>.</li>
+        <li>In Step 7, review the summary, result table, plots, downloads, and analysis log. Interpret DEG in the context of the study design.</li>
+      </ol>
+    </section>
+
+    <section id="sample-selection" class="step-card">
+      <div class="step-head">
+        <h2>Sample Selection and BioProject Checks</h2>
+      </div>
+      <ul class="manual-list">
+        <li><strong>General rule</strong>: Perform DEG analysis within the same BioProject whenever possible. This reduces differences caused by laboratory, sequencing, or data-processing effects.</li>
+        <li><strong>Recommended comparison</strong>: Compare groups with the same BioProject, tissue, stage, cultivar, and other background conditions.</li>
+        <li><strong>Avoid confounding</strong>: Do not mix multiple major differences between groups, such as treatment, tissue, cultivar, and project, in one comparison.</li>
+        <li><strong>Metadata check</strong>: If sample labels are unclear, use the BioProject accession to inspect the BioProject, BioSample, and SRA records before analysis.</li>
+        <li><strong>Original publication</strong>: When possible, read the source publication linked to the BioProject. Confirm treatment, genotype, tissue, developmental stage, replicate structure, and batch information.</li>
+        <li><strong>Replicates</strong>: Two samples per group are allowed, but variance estimates are more reliable with three or more biological replicates.</li>
+        <li><strong>Sample identity</strong>: Check SRA, BioSample, treatment, and attributes. Do not place the same sample in both groups.</li>
+      </ul>
+      <p class="manual-note">A statistically significant result is not always biologically meaningful if the two groups come from different projects or poorly matched sample conditions.</p>
+    </section>
+
+    <section id="parameters" class="step-card">
+      <div class="step-head">
+        <h2>Set Analysis Parameters</h2>
+      </div>
+      <div class="manual-two-column">
+        <div>
+          <h3>Analysis Engine</h3>
+          <p><strong>R / DESeq2 (standard)</strong> is recommended for formal analysis. <strong>High-speed edgeR-like Z-test</strong> is intended for rapid screening.</p>
+        </div>
+        <div>
+          <h3>Thresholds</h3>
+          <p>A gene is counted as Up or Down only when both the significance threshold and the absolute log2 fold change threshold are met.</p>
+        </div>
+        <div>
+          <h3>Filtering</h3>
+          <p><strong>Low-expression pre-filtering</strong> removes genes with very low counts before model fitting. The default setting is suitable for most first runs.</p>
+        </div>
+        <div>
+          <h3>DESeq2 Options</h3>
+          <p>For sparse GExA-style matrices, <strong>poscounts</strong> may improve size-factor estimation. Try this option if DESeq2 reports normalization problems.</p>
+        </div>
+      </div>
+      <h3 class="manual-subhead">Recommended First Run</h3>
+      <ul class="manual-list">
+        <li>Use <strong>R / DESeq2 (standard)</strong> for the main analysis.</li>
+        <li>Use <strong>FDR threshold = 0.05</strong> as a common starting point for multiple-testing correction.</li>
+        <li>Use <strong>absolute log2 fold change threshold = 1</strong> to focus on genes with at least a two-fold difference.</li>
+        <li>Keep <strong>Low-expression pre-filtering</strong> enabled for most datasets.</li>
+        <li>Select MA and volcano plots first. Add PCA or heatmaps when sample-level structure must be checked.</li>
+      </ul>
+      <h3 class="manual-subhead">Parameter Guide</h3>
+      <div class="manual-two-column">
+        <div>
+          <h3>FDR Threshold</h3>
+          <p>FDR is the adjusted p-value after testing many genes. A lower value is stricter and gives fewer DEG.</p>
+        </div>
+        <div>
+          <h3>Log2 Fold Change Threshold</h3>
+          <p>This controls the minimum effect size. A value of 1 means a two-fold increase or decrease.</p>
+        </div>
+        <div>
+          <h3>Minimum Total Count</h3>
+          <p>Genes with total counts below this value across selected samples are removed before testing.</p>
+        </div>
+        <div>
+          <h3>Independent Filtering</h3>
+          <p>DESeq2 can remove genes with low statistical power during result generation. This is usually helpful.</p>
+        </div>
+        <div>
+          <h3>Fit Type</h3>
+          <p>This controls dispersion fitting in DESeq2. Use parametric first. Try local or mean only if DESeq2 reports a fit problem.</p>
+        </div>
+        <div>
+          <h3>Size-factor Estimation</h3>
+          <p>Use poscounts for sparse matrices with many zeros. This is often suitable for large public GExA-style datasets.</p>
+        </div>
+        <div>
+          <h3>Cooks Cutoff</h3>
+          <p>Cook's cutoff detects influential samples. Keep FALSE when sample numbers are small or when the app warns about this setting.</p>
+        </div>
+        <div>
+          <h3>Test</h3>
+          <p>Use Wald for a standard two-group comparison. LRT is mainly useful for testing more complex model terms.</p>
+        </div>
+      </div>
+      <p class="manual-note">If you are uncertain, start with the default settings. Change parameters only when warnings, sample design, or a clear analysis plan requires it.</p>
+    </section>
+
+    <section id="results" class="step-card">
+      <div class="step-head">
+        <h2>Results and Downloads</h2>
+      </div>
+      <ul class="manual-list">
+        <li><strong>Summary cards</strong>: Review the number of tested genes, Up genes, Down genes, and selected thresholds.</li>
+        <li><strong>Result table</strong>: Sort and filter genes by adjusted p-value, log2 fold change, base mean, TPM, or annotation.</li>
+        <li><strong>Plots</strong>: Use the MA plot to inspect expression-dependent changes. Use the volcano plot to inspect effect size and significance. Use PCA and heatmaps to assess sample-level structure.</li>
+        <li><strong>Downloads</strong>: Save result tables, normalized counts, plots, and logs. Results are cleared when the page is reloaded.</li>
+        <li><strong>Gene links</strong>: When available, external GExA and TGIF-DB links provide additional gene and expression information.</li>
+      </ul>
+      <h3 class="manual-subhead">How to Read the Result Table</h3>
+      <div class="manual-two-column">
+        <div>
+          <h3>Direction</h3>
+          <p>Up means higher expression in treatment than in control. Down means lower expression in treatment than in control.</p>
+        </div>
+        <div>
+          <h3>baseMean</h3>
+          <p>This is the average normalized count across selected samples. Very low values should be interpreted with caution.</p>
+        </div>
+        <div>
+          <h3>log2FoldChange</h3>
+          <p>This is the estimated effect size. Positive values indicate higher expression in treatment. Negative values indicate lower expression.</p>
+        </div>
+        <div>
+          <h3>pvalue and padj</h3>
+          <p>pvalue is the raw test result. padj is corrected for many tested genes and should usually be used for DEG selection.</p>
+        </div>
+        <div>
+          <h3>TPM Columns</h3>
+          <p>TPM values help describe expression level in each group. They are not used by DESeq2 for statistical testing.</p>
+        </div>
+        <div>
+          <h3>Annotation</h3>
+          <p>Annotation and homolog columns help assign possible gene function. They should be checked with external evidence when important.</p>
+        </div>
+      </div>
+      <h3 class="manual-subhead">Beginner Interpretation Guide</h3>
+      <ul class="manual-list">
+        <li>Do not select DEG by p-value alone. Use adjusted p-value, effect size, expression level, and study design together.</li>
+        <li>Check whether control and treatment samples separate as expected in PCA or heatmaps. Unexpected separation may indicate batch effects or mislabeled samples.</li>
+        <li>Genes with large fold change but very low expression may be unstable. Check baseMean and TPM before prioritizing them.</li>
+        <li>Report the selected thresholds, sample groups, BioProject, analysis engine, and main parameter settings with the results.</li>
+      </ul>
+    </section>
+
+    <section id="troubleshooting" class="step-card">
+      <div class="step-head">
+        <h2>Troubleshooting</h2>
+      </div>
+      <ul class="manual-list">
+        <li><strong>The Run button is disabled</strong>: Select at least two control samples and two treatment samples.</li>
+        <li><strong>Loading takes a long time</strong>: Large datasets can be slow on first access. Reload the page if loading does not finish.</li>
+        <li><strong>The uploaded file fails</strong>: Check that counts are integers and that there are no negative values, empty cells, duplicate sample names, or duplicate gene IDs.</li>
+        <li><strong>DESeq2 fails</strong>: Try size-factor estimation with poscounts, keep Cooks cutoff set to FALSE, and disable heavy plots.</li>
+        <li><strong>Too few DEG are detected</strong>: Check replicate number, sample matching, FDR threshold, log2 fold change threshold, and low-expression filtering.</li>
+        <li><strong>Too many DEG are detected</strong>: Check for batch effects or mixed biological conditions between the two groups.</li>
+        <li><strong>The browser is slow</strong>: Reduce the number of selected samples, disable PCA and heatmap plots, close other tabs, or reload the page.</li>
+      </ul>
+      <p class="manual-note"><a href="./index.html">Back to DEG on Web</a></p>
+    </section>
+  </main>
+</body>
+</html>

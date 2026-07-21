@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
+  >
+  <title>DEG on Web</title>
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260721-help">
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <h1>DEG on Web</h1>
+      <p>For plant DEG analysis.</p>
+    </div>
+    <nav aria-label="Primary">
+      <a href="./index.html" aria-current="page">Home</a>
+      <a href="./help.html">Help</a>
+    </nav>
+  </header>
+
+  <main class="app-shell">
+    <section class="status-strip" aria-live="polite">
+      <div>
+        <span class="status-label">Progress</span>
+        <strong id="progressStatus">Not started</strong>
+      </div>
+      <div>
+        <span class="status-label">Memory</span>
+        <strong id="memoryEstimate">Estimated memory will appear after data and samples are selected.</strong>
+      </div>
+      <div>
+        <span class="status-label">Runtime</span>
+        <strong id="runtimeStatus">App 20260717 | webR not started</strong>
+      </div>
+    </section>
+
+    <section class="step-card">
+      <div class="step-head">
+        <h2><span class="step-number">STEP 1.</span> Select data</h2>
+      </div>
+
+      <div class="mode-grid">
+        <label class="mode-option">
+          <input type="radio" name="data-mode" value="gexa" checked>
+          <span>GExA dataset</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="data-mode" value="upload">
+          <span>Upload count matrix</span>
+        </label>
+      </div>
+
+      <div id="gexaPanel" class="data-panel">
+        <label for="datasetSelect">Dataset</label>
+        <select id="datasetSelect"></select>
+        <div id="datasetInfo" class="dataset-info">Loading dataset catalog...</div>
+      </div>
+
+      <div id="uploadPanel" class="data-panel" hidden>
+        <label for="countFile">Count matrix CSV / TSV / TXT / gzip</label>
+        <p class="upload-hint">Use a raw integer count matrix. Put Gene ID in the first column and sample names in all remaining columns.</p>
+        <input id="countFile" type="file" accept=".csv,.tsv,.txt,.gz,text/csv,text/tab-separated-values,text/plain">
+        <div class="example-actions">
+          <button id="showExampleMatrix" type="button">Show example</button>
+          <button id="downloadExampleMatrix" type="button">Download example CSV</button>
+        </div>
+        <pre id="exampleMatrixPreview" class="example-matrix-preview" hidden></pre>
+        <p id="uploadStatus" class="muted">No file selected. Files are parsed locally in this browser.</p>
+      </div>
+    </section>
+
+    <section class="step-card">
+      <div id="controlSelector">
+        <div class="selector-heading selector-heading-control">
+          <div>
+            <h3>STEP 2. Select control samples</h3>
+            <p>At least 2 samples are required. Three or more biological replicates are recommended.</p>
+          </div>
+          <div class="selector-count" data-role="count">0 selected</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step-card">
+      <div id="treatmentSelector">
+        <div class="selector-heading selector-heading-treatment">
+          <div>
+            <h3>STEP 3. Select treatment samples</h3>
+            <p>At least 2 samples are required. Three or more biological replicates are recommended.</p>
+          </div>
+          <div class="selector-count" data-role="count">0 selected</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step-card">
+      <div class="step-head">
+        <h2><span class="step-number">STEP 4.</span> Set analysis parameters</h2>
+      </div>
+
+      <div class="engine-panel">
+        <label class="engine-control">
+          <span>Analysis Engine</span>
+          <select id="analysisEngine">
+            <option value="deseq2" selected>R / DESeq2 (standard)</option>
+            <option value="javascript">High-speed edgeR-like Z-test (ultrafast)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="parameter-grid">
+        <label>
+          <div id="pModeField" class="p-mode-field" hidden>
+            <span>P-value correction mode</span>
+            <select id="p-mode">
+              <option value="fdr" selected>FDR (Benjamini-Hochberg)</option>
+              <option value="bonferroni">Bonferroni adjusted p-value</option>
+              <option value="raw">Raw p-value (no adjustment)</option>
+            </select>
+          </div>
+          <span id="pThreshLabel">FDR threshold</span>
+          <input id="fdrThreshold" type="number" min="0.000001" max="0.999999" step="0.01" value="0.05">
+        </label>
+        <label>
+          <span>Absolute log2 fold change threshold</span>
+          <input id="log2fcThreshold" type="number" min="0" step="0.1" value="1">
+        </label>
+        <label class="deseq2-only-param inline-check">
+          <input id="preFiltering" type="checkbox" checked>
+          <span>Low-expression pre-filtering</span>
+        </label>
+        <label>
+          <span>Minimum total count across selected samples</span>
+          <input id="minimumCount" type="number" min="0" step="1" value="5">
+        </label>
+        <input id="minimumSamples" type="hidden" value="1">
+        <div class="parameter-with-help deseq2-only-param">
+          <label class="inline-check">
+            <input id="independentFiltering" type="checkbox" checked>
+            <span>DESeq2 independent filtering</span>
+          </label>
+          <p class="parameter-help">After model fitting, DESeq2 uses mean normalized counts to omit low-power genes from multiple-testing adjustment.</p>
+        </div>
+        <label class="deseq2-only-param">
+          <span>Fit type</span>
+          <select id="fitType">
+            <option value="parametric">parametric</option>
+            <option value="local">local</option>
+            <option value="mean">mean</option>
+          </select>
+        </label>
+        <label class="deseq2-only-param">
+          <span>Size-factor estimation</span>
+          <select id="sfType">
+            <option value="ratio">ratio</option>
+            <option value="poscounts">poscounts</option>
+            <option value="iterate">iterate</option>
+          </select>
+        </label>
+        <label class="deseq2-only-param">
+          <span>Cooks cutoff</span>
+          <select id="cooksCutoff">
+            <option value="false">FALSE</option>
+            <option value="true">TRUE</option>
+          </select>
+        </label>
+        <label class="deseq2-only-param">
+          <span>Test</span>
+          <select id="testType">
+            <option value="Wald">Wald</option>
+            <option value="LRT">LRT</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="step-card">
+      <div class="step-head">
+        <h2><span class="step-number">STEP 5.</span> Select plots</h2>
+      </div>
+
+      <div class="plot-grid">
+        <label class="inline-check">
+          <input id="plot-ma" type="checkbox">
+          <span>MA plot</span>
+        </label>
+        <label class="inline-check">
+          <input id="plot-volcano" type="checkbox">
+          <span>Volcano plot</span>
+        </label>
+        <label class="inline-check plot-heavy">
+          <input id="plot-pca" type="checkbox">
+          <span>PCA plot <small>Computationally intensive. Requires variance-stabilizing transformation.</small></span>
+        </label>
+        <label class="inline-check plot-heavy">
+          <input id="plot-sampleCorrelation" type="checkbox">
+          <span>Sample correlation heatmap <small>Computationally intensive for many samples.</small></span>
+        </label>
+        <label class="inline-check plot-heavy">
+          <input id="plot-sampleDistance" type="checkbox">
+          <span>Sample distance heatmap <small>Computationally intensive for many samples.</small></span>
+        </label>
+      </div>
+    </section>
+
+    <section class="step-card">
+      <div class="step-head">
+        <h2><span class="step-number">STEP 6.</span> Run analysis</h2>
+      </div>
+
+      <div id="warningPanel" class="warning-panel" hidden>
+        <ul id="warningList"></ul>
+      </div>
+
+      <div class="run-actions">
+        <button id="runButton" type="button" disabled>Run DEG analysis</button>
+        <button id="cancelButton" type="button" disabled>Stop analysis</button>
+      </div>
+
+      <div id="analysisActivity" class="analysis-activity" hidden>
+        <div class="analysis-activity-head">
+          <span class="status-label">Analysis activity</span>
+          <strong id="analysisElapsed">0 sec total</strong>
+        </div>
+        <ol id="analysisStageList"></ol>
+      </div>
+
+      <div id="errorPanel" class="error-panel" hidden>
+        <pre id="errorText"></pre>
+      </div>
+    </section>
+
+    <section id="resultsSection" class="step-card results-section" hidden>
+      <div class="step-head">
+        <h2><span class="step-number">STEP 7.</span> Results</h2>
+      </div>
+
+      <div id="summaryCards" class="summary-grid"></div>
+
+      <h3>Result table</h3>
+      <div id="resultTable"></div>
+
+      <h3>Plots</h3>
+      <div id="plotsContainer" class="plots-container"></div>
+
+      <h3>Downloads</h3>
+      <div id="downloadsContainer"></div>
+
+      <h3>Analysis log</h3>
+      <pre id="analysisLog" class="analysis-log"></pre>
+    </section>
+
+  </main>
+
+  <script type="module" src="./js/app.js?v=20260717-gene-length"></script>
+</body>
+</html>
