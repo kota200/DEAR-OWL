@@ -1,6 +1,6 @@
-# DEG on Web
+# DEAR-OWL (Differential Expression Analysis Resource on the Web (Lite))
 
-DEG on Web is a static browser application for two-group differential gene
+DEAR-OWL is a static browser application for two-group differential gene
 expression analysis of plant RNA-seq count data.
 
 The app can analyze GExA-style public datasets or user-uploaded raw count
@@ -24,7 +24,7 @@ analysis API is required.
 
 ```text
 .
-├── index.html              # Main DEG on Web application
+├── index.html              # Main DEAR-OWL application
 ├── help.html               # User help page
 ├── config/                 # Dataset catalog
 ├── css/                    # Application styles
@@ -151,6 +151,6 @@ components, including webR, R packages, and DESeq2, retain their own licenses.
 
 ## Acknowledgments
 
-DEG on Web uses webR and Bioconductor DESeq2. Public expression datasets are
+DEAR-OWL uses webR and Bioconductor DESeq2. Public expression datasets are
 intended to be used with appropriate citation of their original BioProject,
 BioSample, SRA records, and source publications.
