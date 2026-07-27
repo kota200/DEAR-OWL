@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DEAR-OWL multi-group browser smoke test</title>
+  <style>
+    body {
+      color: #17202a;
+      font: 16px/1.5 system-ui, sans-serif;
+      margin: 2rem auto;
+      max-width: 70rem;
+      padding: 0 1rem;
+    }
+
+    button {
+      font: inherit;
+      padding: 0.5rem 0.75rem;
+    }
+
+    pre {
+      background: #f3f5f7;
+      border: 1px solid #cbd3da;
+      min-height: 8rem;
+      overflow: auto;
+      padding: 1rem;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>DEAR-OWL multi-group browser smoke test</h1>
+  <button id="run" type="button">Run smoke test</button>
+  <p id="status">Ready</p>
+  <pre id="output"></pre>
+
+  <script type="module">
+    import {
+      loadDatasetBundle,
+      loadSelectedCountVectors,
+      releaseDirectMatrixCache
+    } from "../js/data-loader.js?v=20260727-defaults";
+    import { buildBinaryCountMatrixFromVectors } from "../js/deseq-runner.js?v=20260727-defaults";
+    import { runMultiGroupDeseqAnalysis } from "../js/multi-group-runner.js?v=20260727-defaults";
+
+    const runButton = document.querySelector("#run");
+    const status = document.querySelector("#status");
+    const output = document.querySelector("#output");
+
+    function comparisonSetup(controlSamples, treatmentASamples, treatmentBSamples) {
+      const groups = [
+        { id: "control", label: "Control", samples: controlSamples },
+        { id: "treatment_a", label: "Treatment A", samples: treatmentASamples },
+        { id: "treatment_b", label: "Treatment B", samples: treatmentBSamples }
+      ];
+      const contrasts = [
+        {
+          id: "treatment_a_vs_control",
+          numeratorId: "treatment_a",
+          denominatorId: "control",
+          label: "Treatment A vs Control"
+        },
+        {
+          id: "treatment_b_vs_control",
+          numeratorId: "treatment_b",
+          denominatorId: "control",
+          label: "Treatment B vs Control"
+        },
+        {
+          id: "treatment_b_vs_treatment_a",
+          numeratorId: "treatment_b",
+          denominatorId: "treatment_a",
+          label: "Treatment B vs Treatment A"
+        }
+      ];
+
+      return { groups, contrasts };
+    }
+
+    function buildSyntheticFixture() {
+      const geneIds = Array.from({ length: 240 }, (_, index) => `gene_${index + 1}`);
+      const sampleIds = [
+        "Control_1",
+        "Control_2",
+        "Control_3",
+        "Treatment_A_1",
+        "Treatment_A_2",
+        "Treatment_A_3",
+        "Treatment_B_1",
+        "Treatment_B_2",
+        "Treatment_B_3"
+      ];
+      const sampleObjects = sampleIds.map((sampleId) => ({ sample_id: sampleId }));
+      const vectors = new Map();
+
+      sampleIds.forEach((sampleId, sampleIndex) => {
+        const groupIndex = Math.floor(sampleIndex / 3);
+        const replicateIndex = sampleIndex % 3;
+        const counts = Int32Array.from(geneIds, (_, geneIndex) => {
+          const base = 25 + ((geneIndex * 17) % 140);
+          const treatmentAEffect = groupIndex === 1 && geneIndex < 70 ? 2.8 : 1;
+          const treatmentBEffect = groupIndex === 2 && geneIndex >= 70 && geneIndex < 140 ? 3.2 : 1;
+          const sharedEffect = groupIndex > 0 && geneIndex >= 140 && geneIndex < 190 ? 1.9 : 1;
+          const replicateEffect = [0.91, 1.03, 1.12][replicateIndex];
+          const deterministicNoise = ((geneIndex + 3) * (sampleIndex + 5)) % 13;
+          return Math.max(
+            1,
+            Math.round(
+              base *
+              treatmentAEffect *
+              treatmentBEffect *
+              sharedEffect *
+              replicateEffect +
+              deterministicNoise
+            )
+          );
+        });
+        vectors.set(sampleId, counts);
+      });
+
+      const { groups, contrasts } = comparisonSetup(
+        sampleObjects.slice(0, 3),
+        sampleObjects.slice(3, 6),
+        sampleObjects.slice(6, 9)
+      );
+
+      return {
+        name: "synthetic",
+        countMatrix: buildBinaryCountMatrixFromVectors(geneIds, sampleObjects, vectors),
+        groups,
+        contrasts,
+        expectedGeneCount: 240,
+        expectedSampleCount: 9
+      };
+    }
+
+    async function buildPrjna766308Fixture() {
+      const dataset = {
+        id: "pearl_millet__tift_local_smoke",
+        label: "Pearl millet - Tift",
+        format: "direct_matrix",
+        countUrl: new URL(
+          "../../data/raw/pearl_millet__tift/Pearl_millet_count_data_cv_Tift.csv",
+          window.location.href
+        ).href,
+        matrixOrientation: "samples_as_rows",
+        metadataColumnCount: 10,
+        sampleIdColumn: "SRA",
+        geneCount: 36510,
+        sampleCount: 987
+      };
+      const bundle = await loadDatasetBundle(
+        dataset,
+        (event) => {
+          status.textContent = typeof event === "string"
+            ? event
+            : event?.message || event?.stage || "Loading PRJNA766308 matrix";
+        },
+        { structuredProgress: true }
+      );
+      const samplesByCode = new Map(
+        bundle.sampleRows
+          .filter((sample) => sample.BioProject === "PRJNA766308")
+          .map((sample) => [sample.code, sample])
+      );
+      const selectCodes = (codes) => codes.map((code) => {
+        const sample = samplesByCode.get(code);
+        if (!sample) {
+          throw new Error(`PRJNA766308 sample code is missing: ${code}`);
+        }
+        return sample;
+      });
+      const controlSamples = selectCodes([
+        "CK_R24h_1",
+        "CK_R24h_2",
+        "CK_R24h_3",
+        "CK_R48h_1",
+        "CK_R48h_2",
+        "CK_R48h_3"
+      ]);
+      const treatmentASamples = selectCodes(["D_R24h_1", "D_R24h_2", "D_R24h_3"]);
+      const treatmentBSamples = selectCodes(["D_R48h_1", "D_R48h_2", "D_R48h_3"]);
+      const allSamples = [...controlSamples, ...treatmentASamples, ...treatmentBSamples];
+      const vectors = await loadSelectedCountVectors(
+        bundle,
+        allSamples,
+        (message) => {
+          status.textContent = message;
+        }
+      );
+      const countMatrix = buildBinaryCountMatrixFromVectors(
+        bundle.genes,
+        allSamples,
+        vectors
+      );
+      const { groups, contrasts } = comparisonSetup(
+        controlSamples,
+        treatmentASamples,
+        treatmentBSamples
+      );
+      releaseDirectMatrixCache(bundle);
+
+      return {
+        name: "PRJNA766308",
+        countMatrix,
+        groups,
+        contrasts,
+        expectedGeneCount: 36510,
+        expectedSampleCount: 12
+      };
+    }
+
+    async function runSmokeTest() {
+      runButton.disabled = true;
+      output.textContent = "";
+      status.textContent = "Starting";
+
+      try {
+        const fixture = new URLSearchParams(window.location.search).get("fixture") === "prjna766308"
+          ? await buildPrjna766308Fixture()
+          : buildSyntheticFixture();
+        const result = await runMultiGroupDeseqAnalysis({
+          countCsv: null,
+          countMatrix: fixture.countMatrix,
+          colDataCsv: "",
+          groups: fixture.groups,
+          contrasts: fixture.contrasts,
+          parameters: {
+            minimumCount: 5,
+            preFiltering: true,
+            sfType: "poscounts",
+            fitType: "parametric",
+            cooksCutoff: false,
+            fdrThreshold: 0.05,
+            independentFiltering: true,
+            test: "Wald"
+          },
+          plots: {
+            dispersion: false,
+            pca: false,
+            sampleCorrelation: false,
+            sampleDistance: false
+          },
+          runGlobal: true,
+          onProgress(message) {
+            status.textContent = message;
+          }
+        });
+
+        const checks = {
+          fixture: fixture.name,
+          inputGenes: fixture.countMatrix.geneCount,
+          selectedSamples: fixture.countMatrix.sampleCount,
+          mode: result.mode,
+          engine: result.engine,
+          contrastCount: result.contrasts.length,
+          contrastRows: result.contrasts.map((contrast) => contrast.rows.length),
+          globalRows: result.globalResult?.rows.length || 0,
+          sizeFactorCount: result.sizeFactors.length,
+          appVersion: result.summary.appVersion,
+          webRChannel: result.summary.channelType
+        };
+        const passed =
+          checks.mode === "multi_group" &&
+          checks.engine === "deseq2" &&
+          checks.inputGenes === fixture.expectedGeneCount &&
+          checks.selectedSamples === fixture.expectedSampleCount &&
+          checks.contrastCount === 3 &&
+          checks.contrastRows.every((count) => count === fixture.expectedGeneCount) &&
+          checks.globalRows === fixture.expectedGeneCount &&
+          checks.sizeFactorCount === fixture.expectedSampleCount &&
+          checks.webRChannel === "PostMessage";
+
+        if (!passed) {
+          throw new Error(`Unexpected smoke-test output:\n${JSON.stringify(checks, null, 2)}`);
+        }
+
+        status.textContent = "PASS";
+        output.textContent = JSON.stringify(checks, null, 2);
+      } catch (error) {
+        status.textContent = "FAIL";
+        output.textContent = error?.stack || error?.message || String(error);
+      } finally {
+        runButton.disabled = false;
+      }
+    }
+
+    runButton.addEventListener("click", runSmokeTest);
+    runSmokeTest();
+  </script>
+</body>
+</html>

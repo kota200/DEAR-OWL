@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  appVersion: "20260717",
+  appVersion: "20260727",
   datasetCatalogUrl: "./config/datasets.json?v=20260717-gene-length",
   externalDataBaseUrl: "/RNADB/Download/files/",
   defaultPageSize: 100,
@@ -26,8 +26,8 @@ export const DEFAULT_PARAMETERS = {
   minimumSamples: 1,
   independentFiltering: true,
   fitType: "parametric",
-  sfType: "poscounts",
-  cooksCutoff: false,
+  sfType: "ratio",
+  cooksCutoff: true,
   test: "Wald"
 };
 

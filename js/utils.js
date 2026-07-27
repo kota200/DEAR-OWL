@@ -239,18 +239,67 @@ export async function gunzipArrayBuffer(buffer) {
   return await new Response(stream).arrayBuffer();
 }
 
+function clampProgressPercent(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+
+  return Math.min(100, Math.max(0, number));
+}
+
+function buildFetchProgressEvent({ message, stage, loadedBytes = null, totalBytes = null }) {
+  const hasTotal = Number.isFinite(totalBytes) && totalBytes > 0;
+  const hasLoaded = Number.isFinite(loadedBytes);
+  const percent = hasTotal && hasLoaded
+    ? clampProgressPercent(loadedBytes / totalBytes * 100)
+    : null;
+
+  return {
+    message,
+    stage,
+    loadedBytes: hasLoaded ? loadedBytes : null,
+    totalBytes: hasTotal ? totalBytes : null,
+    loaded: hasLoaded ? loadedBytes : null,
+    total: hasTotal ? totalBytes : null,
+    percent,
+    mode: percent === null ? "indeterminate" : "determinate"
+  };
+}
+
 export async function fetchArrayBufferWithProgress(url, onProgress, options = {}) {
-  const response = await fetch(url, options);
+  const {
+    progressMessage = "Downloading dataset files",
+    progressStage = "Downloading dataset files",
+    ...fetchOptions
+  } = options;
+  const response = await fetch(url, fetchOptions);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   }
 
-  const contentLength = Number(response.headers.get("content-length") || 0);
+  const encodedResponse = Boolean(response.headers.get("content-encoding"));
+  const contentLength = encodedResponse
+    ? null
+    : Number(response.headers.get("content-length") || 0) || null;
 
-  if (!response.body || !contentLength) {
+  onProgress?.(buildFetchProgressEvent({
+    message: progressMessage,
+    stage: progressStage,
+    loadedBytes: 0,
+    totalBytes: contentLength
+  }));
+
+  if (!response.body) {
     const buffer = await response.arrayBuffer();
-    onProgress?.({ loaded: buffer.byteLength, total: buffer.byteLength });
+    onProgress?.(buildFetchProgressEvent({
+      message: progressMessage,
+      stage: progressStage,
+      loadedBytes: buffer.byteLength,
+      totalBytes: contentLength
+    }));
     return buffer;
   }
 
@@ -267,7 +316,12 @@ export async function fetchArrayBufferWithProgress(url, onProgress, options = {}
 
     chunks.push(value);
     loaded += value.byteLength;
-    onProgress?.({ loaded, total: contentLength });
+    onProgress?.(buildFetchProgressEvent({
+      message: progressMessage,
+      stage: progressStage,
+      loadedBytes: loaded,
+      totalBytes: contentLength
+    }));
   }
 
   const buffer = new Uint8Array(loaded);
@@ -281,8 +335,8 @@ export async function fetchArrayBufferWithProgress(url, onProgress, options = {}
   return buffer.buffer;
 }
 
-export async function fetchJson(url) {
-  const response = await fetch(url);
+export async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
@@ -291,8 +345,8 @@ export async function fetchJson(url) {
   return await response.json();
 }
 
-export async function fetchGzipJson(url) {
-  const response = await fetch(url);
+export async function fetchGzipJson(url, options = {}) {
+  const response = await fetch(url, options);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);

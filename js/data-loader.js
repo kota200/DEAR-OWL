@@ -13,21 +13,37 @@ export async function loadDatasetsCatalog() {
   return await fetchJson(APP_CONFIG.datasetCatalogUrl);
 }
 
-export async function loadDatasetBundle(dataset, onProgress = null) {
+export async function loadDatasetBundle(dataset, onProgress = null, options = {}) {
   if (isDirectMatrixDataset(dataset)) {
-    return await loadDirectMatrixBundle(dataset, onProgress);
+    return await loadDirectMatrixBundle(dataset, onProgress, options);
   }
 
-  onProgress?.("Loading sample metadata");
-  const samples = await fetchJson(dataset.sampleMetadataUrl);
+  emitProgress(onProgress, "Loading sample metadata", {
+    stage: "Loading sample metadata",
+    mode: "indeterminate"
+  }, options);
+  const samples = await fetchJson(dataset.sampleMetadataUrl, { signal: options.signal });
 
-  onProgress?.("Loading generated-data manifest");
-  const manifest = await fetchJson(dataset.manifestUrl || dataset.sampleMetadataUrl.replace(/samples\.json$/, "manifest.json"));
+  emitProgress(onProgress, "Loading generated-data manifest", {
+    stage: "Loading dataset configuration",
+    mode: "indeterminate"
+  }, options);
+  const manifest = await fetchJson(
+    dataset.manifestUrl || dataset.sampleMetadataUrl.replace(/samples\.json$/, "manifest.json"),
+    { signal: options.signal }
+  );
 
-  onProgress?.("Loading gene order");
-  const genesPayload = await fetchGzipJson(dataset.geneListUrl);
+  emitProgress(onProgress, "Loading gene order", {
+    stage: "Loading gene information",
+    mode: "indeterminate"
+  }, options);
+  const genesPayload = await fetchGzipJson(dataset.geneListUrl, { signal: options.signal });
   const genes = Array.isArray(genesPayload) ? genesPayload : genesPayload.genes;
 
+  emitProgress(onProgress, "Validating dataset", {
+    stage: "Validating dataset",
+    mode: "indeterminate"
+  }, options);
   if (!Array.isArray(genes) || genes.length === 0) {
     throw new Error("Generated gene list is empty or invalid.");
   }
@@ -36,6 +52,10 @@ export async function loadDatasetBundle(dataset, onProgress = null) {
     throw new Error("Gene order mismatch between manifest and genes.json.gz.");
   }
 
+  emitProgress(onProgress, "Finalizing dataset", {
+    stage: "Finalizing dataset",
+    mode: "indeterminate"
+  }, options);
   return {
     dataset,
     manifest,
@@ -155,34 +175,99 @@ function yieldToBrowser() {
   });
 }
 
-async function fetchMaybeCompressedText(url, onProgress = null, label = "File") {
+function abortError() {
+  try {
+    return new DOMException("Dataset load aborted", "AbortError");
+  } catch {
+    const error = new Error("Dataset load aborted");
+    error.name = "AbortError";
+    return error;
+  }
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : abortError();
+  }
+}
+
+function emitProgress(onProgress, message, event = {}, options = {}) {
+  if (!onProgress) {
+    return;
+  }
+
+  if (options.structuredProgress) {
+    onProgress({
+      message,
+      stage: event.stage || message,
+      mode: event.mode,
+      loadedBytes: event.loadedBytes,
+      totalBytes: event.totalBytes,
+      percent: event.percent
+    });
+    return;
+  }
+
+  onProgress(message);
+}
+
+function emitDownloadProgress(onProgress, label, progress, options = {}) {
+  const loaded = Number(progress.loadedBytes ?? progress.loaded);
+  const total = Number(progress.totalBytes ?? progress.total);
+
+  if (options.structuredProgress) {
+    emitProgress(onProgress, label, {
+      stage: "Downloading dataset files",
+      mode: progress.mode,
+      loadedBytes: Number.isFinite(loaded) ? loaded : null,
+      totalBytes: Number.isFinite(total) && total > 0 ? total : null,
+      percent: progress.percent
+    }, options);
+    return;
+  }
+
+  if (Number.isFinite(total) && total > 0) {
+    const percent = Math.round(Math.min(100, Math.max(0, loaded / total * 100)));
+    onProgress?.(`${label}: ${percent}% (${formatBytes(loaded)} / ${formatBytes(total)})`);
+  } else if (Number.isFinite(loaded)) {
+    onProgress?.(`${label}: ${formatBytes(loaded)} loaded`);
+  } else {
+    onProgress?.(label);
+  }
+}
+
+async function fetchMaybeCompressedText(url, onProgress = null, label = "File", options = {}) {
+  throwIfAborted(options.signal);
   const buffer = await fetchArrayBufferWithProgress(
     url,
-    ({ loaded, total }) => {
-      if (total) {
-        const percent = Math.round(loaded / total * 100);
-        onProgress?.(`${label}: ${percent}% (${formatBytes(loaded)} / ${formatBytes(total)})`);
-      } else {
-        onProgress?.(`${label}: ${formatBytes(loaded)} loaded`);
-      }
-    },
-    { cache: "force-cache" }
+    (progress) => emitDownloadProgress(onProgress, label, progress, options),
+    {
+      cache: "force-cache",
+      signal: options.signal,
+      progressMessage: label,
+      progressStage: "Downloading dataset files"
+    }
   );
 
-  onProgress?.(`${label}: decoding`);
+  emitProgress(onProgress, `${label}: decoding`, {
+    stage: "Decompressing data",
+    mode: "indeterminate"
+  }, options);
   await yieldToBrowser();
+  throwIfAborted(options.signal);
   const raw = await gunzipArrayBuffer(buffer);
   return new TextDecoder("utf-8").decode(raw);
 }
 
-async function fetchResponseWithDatasetFallback(dataset, urlKey, label) {
+async function fetchResponseWithDatasetFallback(dataset, urlKey, label, options = {}) {
+  throwIfAborted(options.signal);
   const primaryUrl = dataset[urlKey];
   const fallbackKey = fallbackUrlKey(urlKey);
   const fallbackUrl = dataset[fallbackKey];
-  let response = await fetch(primaryUrl, { cache: "force-cache" });
+  let response = await fetch(primaryUrl, { cache: "force-cache", signal: options.signal });
 
   if (!response.ok && fallbackUrl && missingResponse(response)) {
-    const fallbackResponse = await fetch(fallbackUrl, { cache: "force-cache" });
+    const fallbackResponse = await fetch(fallbackUrl, { cache: "force-cache", signal: options.signal });
     if (fallbackResponse.ok) {
       dataset[urlKey] = fallbackUrl;
       dataset[fallbackKey] = null;
@@ -206,27 +291,31 @@ async function fetchResponseWithDatasetFallback(dataset, urlKey, label) {
   };
 }
 
-async function fetchMaybeCompressedTextWithDatasetFallback(dataset, urlKey, onProgress = null, label = "File") {
+async function fetchMaybeCompressedTextWithDatasetFallback(dataset, urlKey, onProgress = null, label = "File", options = {}) {
   const primaryUrl = dataset[urlKey];
   const fallbackKey = fallbackUrlKey(urlKey);
   const fallbackUrl = dataset[fallbackKey];
 
   try {
-    return await fetchMaybeCompressedText(primaryUrl, onProgress, label);
+    return await fetchMaybeCompressedText(primaryUrl, onProgress, label, options);
   } catch (error) {
     if (!fallbackUrl || !/HTTP (404|410)\b/.test(error.message)) {
       throw error;
     }
 
-    const text = await fetchMaybeCompressedText(fallbackUrl, onProgress, label);
+    const text = await fetchMaybeCompressedText(fallbackUrl, onProgress, label, options);
     dataset[urlKey] = fallbackUrl;
     dataset[fallbackKey] = null;
     return text;
   }
 }
 
-async function fetchJsonMaybeCompressed(url, onProgress = null, label = "JSON") {
-  const text = await fetchMaybeCompressedText(url, onProgress, label);
+async function fetchJsonMaybeCompressed(url, onProgress = null, label = "JSON", options = {}) {
+  const text = await fetchMaybeCompressedText(url, onProgress, label, options);
+  emitProgress(onProgress, `Parsing ${label}`, {
+    stage: /sample/i.test(label) ? "Now loading datasets..." : "Validating dataset",
+    mode: "indeterminate"
+  }, options);
   return JSON.parse(text);
 }
 
@@ -587,30 +676,47 @@ function firstLine(text) {
   return (index < 0 ? text : text.slice(0, index)).replace(/\r$/, "");
 }
 
-async function loadDirectMatrixBundle(dataset, onProgress = null) {
+async function loadDirectMatrixBundle(dataset, onProgress = null, options = {}) {
+  emitProgress(onProgress, "Loading dataset configuration", {
+    stage: "Loading dataset configuration",
+    mode: "indeterminate"
+  }, options);
   dataset = normalizeDirectDataset(dataset);
+  throwIfAborted(options.signal);
 
   if (!dataset.countUrl) {
     throw new Error("Direct matrix datasets require countUrl in config/datasets.json.");
   }
 
   if (dataset.sampleMetadataUrl && dataset.geneListUrl) {
-    onProgress?.("Loading samples for selected dataset");
+    emitProgress(onProgress, "Loading samples for selected dataset", {
+      stage: "Loading sample metadata",
+      mode: "indeterminate"
+    }, options);
     const samplesPayload = await fetchJsonMaybeCompressed(
       dataset.sampleMetadataUrl,
       onProgress,
-      "Loading sample metadata"
+      "Loading sample metadata",
+      options
     );
 
-    onProgress?.("Loading gene list for selected dataset");
+    emitProgress(onProgress, "Loading gene list for selected dataset", {
+      stage: "Loading gene information",
+      mode: "indeterminate"
+    }, options);
     const genesPayload = await fetchJsonMaybeCompressed(
       dataset.geneListUrl,
       onProgress,
-      "Loading gene list"
+      "Loading gene list",
+      options
     );
     const sampleRows = Array.isArray(samplesPayload) ? samplesPayload : samplesPayload.samples;
     const genes = directGenePayload(genesPayload);
 
+    emitProgress(onProgress, "Validating dataset", {
+      stage: "Validating dataset",
+      mode: "indeterminate"
+    }, options);
     if (!Array.isArray(sampleRows) || sampleRows.length === 0) {
       throw new Error("Sample metadata is empty or invalid.");
     }
@@ -620,11 +726,15 @@ async function loadDirectMatrixBundle(dataset, onProgress = null) {
     }
 
     if (dataset.tpmVectorManifestUrl) {
-      onProgress?.("Getting TPM data");
+      emitProgress(onProgress, "Getting TPM data", {
+        stage: "Loading dataset configuration",
+        mode: "indeterminate"
+      }, options);
       const vectorManifest = await fetchJsonMaybeCompressed(
         dataset.tpmVectorManifestUrl,
         onProgress,
-        "Getting TPM data"
+        "Getting TPM data",
+        options
       );
       if (vectorManifest.format !== "float32-gzip-v1") {
         throw new Error(`Unsupported TPM vector format: ${vectorManifest.format || "missing"}.`);
@@ -645,7 +755,10 @@ async function loadDirectMatrixBundle(dataset, onProgress = null) {
       }
     }
 
-    onProgress?.(`Loaded ${sampleRows.length.toLocaleString()} samples and ${genes.length.toLocaleString()} genes`);
+    emitProgress(onProgress, `Loaded ${sampleRows.length.toLocaleString()} samples and ${genes.length.toLocaleString()} genes`, {
+      stage: "Finalizing dataset",
+      mode: "indeterminate"
+    }, options);
     return {
       dataset,
       manifest: {
@@ -671,15 +784,35 @@ async function loadDirectMatrixBundle(dataset, onProgress = null) {
   }
 
   if ((dataset.matrixOrientation || "samples_as_rows") === "samples_as_rows") {
-    onProgress?.("Reading sample metadata from count matrix");
-    return await loadSampleRowBundleFromCountUrl(dataset, onProgress);
+    emitProgress(onProgress, "Reading sample metadata from count matrix", {
+      stage: "Preparing count matrix header",
+      mode: "indeterminate"
+    }, options);
+    return await loadSampleRowBundleFromCountUrl(dataset, onProgress, options);
   }
 
-  onProgress?.("Loading raw count matrix");
-  const text = await fetchMaybeCompressedTextWithDatasetFallback(dataset, "countUrl", onProgress, "Downloading count matrix");
+  emitProgress(onProgress, "Loading raw count matrix", {
+    stage: "Preparing count matrix",
+    mode: "indeterminate"
+  }, options);
+  const text = await fetchMaybeCompressedTextWithDatasetFallback(
+    dataset,
+    "countUrl",
+    onProgress,
+    "Downloading count matrix",
+    options
+  );
   const delimiter = detectConfiguredDelimiter(dataset, dataset.countUrl);
+  emitProgress(onProgress, "Parsing count matrix", {
+    stage: "Now loading datasets...",
+    mode: "indeterminate"
+  }, options);
   const { rows, delimiter: parsedDelimiter } = parseDelimitedRows(text, delimiter);
 
+  emitProgress(onProgress, "Validating dataset", {
+    stage: "Validating dataset",
+    mode: "indeterminate"
+  }, options);
   if (rows.length < 2) {
     throw new Error("Raw count matrix must contain a header and at least one data row.");
   }
@@ -692,31 +825,56 @@ async function loadDirectMatrixBundle(dataset, onProgress = null) {
   bundle.directMatrix.countText = text;
   bundle.directMatrix.countDelimiter = parsedDelimiter;
 
-  onProgress?.("Raw count matrix ready");
+  emitProgress(onProgress, "Raw count matrix ready", {
+    stage: "Finalizing dataset",
+    mode: "indeterminate"
+  }, options);
   return bundle;
 }
 
-async function loadSampleRowBundleFromCountUrl(dataset, onProgress = null) {
+async function loadSampleRowBundleFromCountUrl(dataset, onProgress = null, options = {}) {
   const delimiter = detectConfiguredDelimiter(dataset, dataset.countUrl);
 
   if (!delimiter) {
-    const text = await fetchMaybeCompressedTextWithDatasetFallback(dataset, "countUrl", onProgress, "Downloading count matrix metadata");
-    return parseSampleRowBundleFromText(dataset, text, null, onProgress);
+    const text = await fetchMaybeCompressedTextWithDatasetFallback(
+      dataset,
+      "countUrl",
+      onProgress,
+      "Downloading count matrix metadata",
+      options
+    );
+    return parseSampleRowBundleFromText(dataset, text, null, onProgress, options);
   }
 
-  const fetched = await fetchResponseWithDatasetFallback(dataset, "countUrl", "count matrix");
+  emitProgress(onProgress, "Preparing count matrix header", {
+    stage: "Preparing count matrix header",
+    mode: "indeterminate"
+  }, options);
+  const fetched = await fetchResponseWithDatasetFallback(dataset, "countUrl", "count matrix", options);
   const response = fetched.response;
   if (!response.ok) {
     throw new Error(`Failed to fetch ${fetched.url}: HTTP ${response.status}`);
   }
 
   if (!response.body) {
-    const text = await fetchMaybeCompressedTextWithDatasetFallback(dataset, "countUrl", onProgress, "Downloading count matrix metadata");
-    return parseSampleRowBundleFromText(dataset, text, delimiter, onProgress);
+    const text = await fetchMaybeCompressedTextWithDatasetFallback(
+      dataset,
+      "countUrl",
+      onProgress,
+      "Downloading count matrix metadata",
+      options
+    );
+    return parseSampleRowBundleFromText(dataset, text, delimiter, onProgress, options);
   }
 
-  const reader = await textStreamReaderForResponse(response, fetched.url);
-  return await parseSampleRowBundleFromReader(dataset, reader, delimiter, onProgress);
+  if (gzipUrl(fetched.url) && !gzipEncodedResponse(response)) {
+    emitProgress(onProgress, "Decompressing data", {
+      stage: "Decompressing data",
+      mode: "indeterminate"
+    }, options);
+  }
+  const reader = await textStreamReaderForResponse(response, fetched.url, onProgress, options);
+  return await parseSampleRowBundleFromReader(dataset, reader, delimiter, onProgress, options);
 }
 
 function buildSampleRowMetadataBundle(dataset, metadataHeaders, genes, sampleRows, delimiter) {
@@ -749,19 +907,36 @@ function buildSampleRowMetadataBundle(dataset, metadataHeaders, genes, sampleRow
   };
 }
 
-function parseSampleRowBundleFromText(dataset, text, delimiter, onProgress = null) {
+function parseSampleRowBundleFromText(dataset, text, delimiter, onProgress = null, options = {}) {
+  throwIfAborted(options.signal);
+  emitProgress(onProgress, "Now loading datasets...", {
+    stage: "Now loading datasets...",
+    mode: "indeterminate"
+  }, options);
   const parsed = parseDelimitedRows(text, delimiter);
+  emitProgress(onProgress, "Validating dataset", {
+    stage: "Validating dataset",
+    mode: "indeterminate"
+  }, options);
   const bundle = buildSampleRowBundle(dataset, parsed.rows);
   bundle.directMatrix.countRowsBySampleId = new Map();
   bundle.directMatrix.countText = null;
   bundle.directMatrix.countDelimiter = parsed.delimiter;
-  onProgress?.(`Loaded ${bundle.sampleRows.length.toLocaleString()} samples and ${bundle.genes.length.toLocaleString()} genes`);
+  emitProgress(onProgress, `Loaded ${bundle.sampleRows.length.toLocaleString()} samples and ${bundle.genes.length.toLocaleString()} genes`, {
+    stage: "Finalizing dataset",
+    mode: "indeterminate"
+  }, options);
   return bundle;
 }
 
-async function parseSampleRowBundleFromReader(dataset, reader, delimiter, onProgress = null) {
+async function parseSampleRowBundleFromReader(dataset, reader, delimiter, onProgress = null, options = {}) {
   const decoder = new TextDecoder("utf-8");
   const metadataColumnCount = Number(dataset.metadataColumnCount ?? dataset.metadataColumnsCount ?? 10);
+  const expectedSamples = Number(dataset.sampleCount);
+  const hasExpectedSamples = Number.isFinite(expectedSamples) && expectedSamples > 0;
+  const sampleProgressInterval = hasExpectedSamples
+    ? Math.max(1, Math.floor(expectedSamples / 100))
+    : 100;
   const sampleRows = [];
   const sampleIds = new Set();
 
@@ -828,7 +1003,10 @@ async function parseSampleRowBundleFromReader(dataset, reader, delimiter, onProg
 
     collectLimit = metadataColumnCount;
     rowNumber += 1;
-    onProgress?.(`Count matrix header ready: ${genes.length.toLocaleString()} genes`);
+    emitProgress(onProgress, `Count matrix header ready: ${genes.length.toLocaleString()} genes`, {
+      stage: "Preparing count matrix header",
+      mode: "indeterminate"
+    }, options);
   }
 
   function processSampleRow() {
@@ -867,8 +1045,19 @@ async function parseSampleRowBundleFromReader(dataset, reader, delimiter, onProg
     });
 
     visited += 1;
-    if (visited % 100 === 0) {
-      onProgress?.(`Reading sample metadata: ${visited.toLocaleString()} samples scanned`);
+    if (hasExpectedSamples && (visited === 1 || visited % sampleProgressInterval === 0 || visited >= expectedSamples)) {
+      emitProgress(onProgress, `Now loading datasets... ${visited.toLocaleString()} / ${expectedSamples.toLocaleString()} samples`, {
+        stage: "Now loading datasets...",
+        mode: "determinate",
+        percent: Math.min(100, visited / expectedSamples * 100),
+        loadedBytes: loaded
+      }, options);
+    } else if (visited % 100 === 0) {
+      emitProgress(onProgress, `Reading sample metadata: ${visited.toLocaleString()} samples scanned`, {
+        stage: "Now loading datasets...",
+        mode: "indeterminate",
+        loadedBytes: loaded
+      }, options);
     }
 
     rowNumber += 1;
@@ -917,6 +1106,7 @@ async function parseSampleRowBundleFromReader(dataset, reader, delimiter, onProg
 
   try {
     while (true) {
+      throwIfAborted(options.signal);
       const { done, value } = await reader.read();
 
       if (done) {
@@ -937,7 +1127,11 @@ async function parseSampleRowBundleFromReader(dataset, reader, delimiter, onProg
 
       loaded += value.byteLength;
       if (loaded % (8 * 1024 * 1024) < value.byteLength) {
-        onProgress?.(`Reading count matrix metadata: ${formatBytes(loaded)} decoded`);
+        emitProgress(onProgress, `Reading count matrix metadata: ${formatBytes(loaded)} decoded`, {
+          stage: "Now loading datasets...",
+          mode: "indeterminate",
+          loadedBytes: loaded
+        }, options);
         await yieldToBrowser();
       }
 
@@ -955,7 +1149,16 @@ async function parseSampleRowBundleFromReader(dataset, reader, delimiter, onProg
     throw new Error("Raw count matrix must contain a header and at least one data row.");
   }
 
-  onProgress?.(`Loaded ${sampleRows.length.toLocaleString()} samples and ${genes.length.toLocaleString()} genes`);
+  emitProgress(onProgress, "Validating dataset", {
+    stage: "Validating dataset",
+    mode: "indeterminate",
+    loadedBytes: loaded
+  }, options);
+  emitProgress(onProgress, `Loaded ${sampleRows.length.toLocaleString()} samples and ${genes.length.toLocaleString()} genes`, {
+    stage: "Finalizing dataset",
+    mode: "indeterminate",
+    loadedBytes: loaded
+  }, options);
   return buildSampleRowMetadataBundle(dataset, metadataHeaders, genes, sampleRows, delimiter);
 }
 
@@ -1291,12 +1494,69 @@ function gzipEncodedResponse(response) {
   return /\bgzip\b/i.test(response.headers.get("content-encoding") || "");
 }
 
-async function textStreamReaderForResponse(response, url) {
-  if (!gzipUrl(url) || gzipEncodedResponse(response)) {
-    return response.body.getReader();
+function responseContentLength(response) {
+  if (gzipEncodedResponse(response)) {
+    return null;
   }
 
-  const sourceReader = response.body.getReader();
+  const total = Number(response.headers.get("content-length") || 0);
+  return Number.isFinite(total) && total > 0 ? total : null;
+}
+
+function streamWithResponseProgress(stream, response, onProgress = null, options = {}) {
+  if (!stream || !onProgress || !options.structuredProgress) {
+    return stream;
+  }
+
+  const sourceReader = stream.getReader();
+  const totalBytes = responseContentLength(response);
+  let loadedBytes = 0;
+
+  function reportProgress() {
+    emitProgress(onProgress, "Now loading datasets...", {
+      stage: "Now loading datasets...",
+      mode: totalBytes ? "determinate" : "indeterminate",
+      loadedBytes,
+      totalBytes,
+      percent: totalBytes ? loadedBytes / totalBytes * 100 : null
+    }, options);
+  }
+
+  reportProgress();
+
+  return new ReadableStream({
+    async pull(controller) {
+      throwIfAborted(options.signal);
+      const next = await sourceReader.read();
+
+      if (next.done) {
+        controller.close();
+        try {
+          sourceReader.releaseLock();
+        } catch {
+          // The stream may already be released after cancellation.
+        }
+        return;
+      }
+
+      loadedBytes += next.value.byteLength;
+      reportProgress();
+      controller.enqueue(next.value);
+    },
+    cancel(reason) {
+      return sourceReader.cancel(reason);
+    }
+  });
+}
+
+async function textStreamReaderForResponse(response, url, onProgress = null, options = {}) {
+  const body = streamWithResponseProgress(response.body, response, onProgress, options);
+
+  if (!gzipUrl(url) || gzipEncodedResponse(response)) {
+    return body.getReader();
+  }
+
+  const sourceReader = body.getReader();
   const first = await sourceReader.read();
 
   if (first.done) {

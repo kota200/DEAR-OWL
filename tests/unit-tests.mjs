@@ -6,11 +6,16 @@ import {
   classifyDirection,
   csvEscape,
   detectDelimiter,
+  fetchArrayBufferWithProgress,
   makeExternalLink,
   objectsToCsv,
   parseDelimitedRows,
   rowsToObjects
 } from "../js/utils.js";
+import {
+  calculateProgressPercent,
+  createDatasetLoadProgressController
+} from "../js/dataset-progress.js";
 import {
   loadAnnotations,
   loadDatasetBundle,
@@ -31,6 +36,18 @@ import {
   monitorConsoleRJob,
   prefilterBinaryCountMatrix
 } from "../js/deseq-runner.js";
+import { runPairwiseZTest } from "../js/fast-ztest.js";
+import {
+  buildGroupedColDataCsv,
+  MAX_MULTI_GROUP_CONTRASTS
+} from "../js/multi-group-controller.js";
+import { runMultiGroupFastAnalysis } from "../js/multi-group-fast-runner.js";
+import { buildStagedMultiGroupDeseq2Stages } from "../js/multi-group-staged-runner.js";
+import {
+  buildDirectionMatrix,
+  buildGeneSet,
+  computeExclusiveIntersections
+} from "../js/intersections.js";
 import { getWebRChannelSupport } from "../js/webr-manager.js";
 import {
   APP_CONFIG,
@@ -52,6 +69,8 @@ const appSource = fs.readFileSync(new URL("../js/app.js", import.meta.url), "utf
 const cssSource = fs.readFileSync(new URL("../css/deseq-app.css", import.meta.url), "utf8");
 const runnerSource = fs.readFileSync(new URL("../js/deseq-runner.js", import.meta.url), "utf8");
 const stagedRunnerSource = fs.readFileSync(new URL("../js/deseq-staged-runner.js", import.meta.url), "utf8");
+const multiGroupRunnerSource = fs.readFileSync(new URL("../js/multi-group-runner.js", import.meta.url), "utf8");
+const multiGroupStagedRunnerSource = fs.readFileSync(new URL("../js/multi-group-staged-runner.js", import.meta.url), "utf8");
 
 function readFixture(name) {
   return fs.readFileSync(new URL(name, fixtureDir), "utf8");
@@ -61,7 +80,14 @@ globalThis.fetch = async (specifier) => {
   const url = new URL(specifier, appRoot);
 
   if (virtualFiles.has(url.href)) {
-    return new Response(virtualFiles.get(url.href), { status: 200 });
+    const body = virtualFiles.get(url.href);
+    const length = typeof body === "string"
+      ? Buffer.byteLength(body)
+      : body.byteLength;
+    return new Response(body, {
+      status: 200,
+      headers: { "content-length": String(length) }
+    });
   }
 
   if (url.protocol !== "file:") {
@@ -90,6 +116,92 @@ globalThis.fetch = async (specifier) => {
   return new Response(bytes, { status: 200 });
 };
 
+class FakeClassList {
+  constructor() {
+    this.values = new Set();
+  }
+
+  toggle(className, force) {
+    const shouldHaveClass = force === undefined ? !this.values.has(className) : Boolean(force);
+    if (shouldHaveClass) {
+      this.values.add(className);
+    } else {
+      this.values.delete(className);
+    }
+  }
+
+  contains(className) {
+    return this.values.has(className);
+  }
+}
+
+class FakeElement {
+  constructor({ hidden = false } = {}) {
+    this.hidden = hidden;
+    this.textContent = "";
+    this.style = {};
+    this.attributes = new Map();
+    this.classList = new FakeClassList();
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null;
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
+
+  hasAttribute(name) {
+    return this.attributes.has(name);
+  }
+}
+
+function progressElements() {
+  return {
+    root: new FakeElement({ hidden: true }),
+    label: new FakeElement(),
+    percent: new FakeElement(),
+    track: new FakeElement(),
+    bar: new FakeElement(),
+    stage: new FakeElement(),
+    bytes: new FakeElement(),
+    live: new FakeElement()
+  };
+}
+
+function progressController(elements, timers = []) {
+  return createDatasetLoadProgressController(elements, {
+    hideDelayMs: 500,
+    scheduleFrame(callback) {
+      callback();
+      return null;
+    },
+    cancelFrame() {},
+    setTimer(callback) {
+      timers.push(callback);
+      return timers.length - 1;
+    },
+    clearTimer(timerId) {
+      timers[timerId] = null;
+    }
+  });
+}
+
+async function withMockFetch(mockFetch, callback) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mockFetch;
+  try {
+    return await callback();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 function validateCountMatrix(text) {
   const { rows } = parseDelimitedRows(text);
   const { headers } = rowsToObjects(rows);
@@ -112,6 +224,180 @@ function validateCountMatrix(text) {
     }
   }
 }
+
+assert.equal(calculateProgressPercent(25, 100), 25, "progress percent is calculated from loaded and total bytes");
+assert.equal(calculateProgressPercent(150, 100), 100, "progress percent is clamped at 100");
+assert.equal(calculateProgressPercent(-10, 100), 0, "progress percent is clamped at 0");
+assert.equal(calculateProgressPercent(10, 0), null, "zero total bytes does not produce a percent");
+
+{
+  const elements = progressElements();
+  const controller = progressController(elements);
+  assert.equal(elements.root.hidden, true, "dataset progress UI starts hidden");
+  assert.equal(controller.getState().active, false, "dataset progress state starts inactive");
+
+  controller.start(1);
+  assert.equal(elements.root.hidden, false, "dataset progress UI is shown on start");
+  assert.equal(elements.label.textContent, "Preparing dataset...", "dataset progress initial stage is shown");
+  assert.equal(elements.percent.textContent, "Estimated progress: 0%", "dataset progress starts at zero percent");
+
+  controller.update(1, {
+    message: "Preparing count matrix header",
+    stage: "Preparing count matrix header",
+    mode: "indeterminate"
+  });
+  assert.equal(elements.percent.textContent, "Estimated progress: 1%", "count matrix header preparation stays near the start");
+
+  controller.update(1, {
+    message: "Downloading dataset files",
+    stage: "Downloading dataset files",
+    loadedBytes: 42,
+    totalBytes: 100
+  });
+  assert.equal(elements.percent.textContent, "Estimated progress: 24%", "estimated dataset download progress percent is shown");
+  assert.ok(elements.bar.style.width.startsWith("23."), "estimated dataset progress bar width is updated");
+  assert.equal(elements.track.getAttribute("aria-valuenow"), "24", "estimated dataset progress sets aria-valuenow");
+  assert.match(elements.track.getAttribute("aria-valuetext"), /estimated/, "estimated progress is exposed to assistive technology");
+  assert.equal(elements.bytes.textContent, "42 B / 100 B", "determinate progress bytes are shown");
+
+  controller.update(1, {
+    message: "Downloading dataset files",
+    stage: "Downloading dataset files",
+    loadedBytes: 180,
+    totalBytes: 100
+  });
+  assert.equal(elements.percent.textContent, "Estimated progress: 55%", "estimated dataset progress stays below ready before completion");
+  assert.equal(elements.bar.style.width, "55%", "estimated dataset progress width stays below ready before completion");
+
+  controller.update(1, {
+    message: "Decompressing data",
+    stage: "Decompressing data",
+    loadedBytes: 180,
+    totalBytes: null,
+    mode: "indeterminate"
+  });
+  assert.equal(elements.percent.textContent, "Estimated progress: 55%", "unknown byte totals keep the current estimated dataset progress");
+  assert.equal(elements.track.getAttribute("aria-valuenow"), "55", "estimated progress keeps aria-valuenow");
+  assert.equal(elements.root.classList.contains("is-determinate"), true, "estimated progress uses determinate bar state");
+
+  controller.update(1, {
+    message: "Parsing sample information",
+    stage: "Parsing sample information",
+    mode: "indeterminate"
+  });
+  assert.equal(elements.label.textContent, "Now loading datasets...", "sample parsing stage uses the requested simple label");
+  assert.equal(elements.percent.textContent, "Estimated progress: 55%", "sample parsing stage keeps the byte-based estimate until new bytes arrive");
+
+  controller.update(1, {
+    message: "Now loading datasets...",
+    stage: "Now loading datasets...",
+    loadedBytes: 70,
+    totalBytes: 100
+  });
+  assert.equal(elements.percent.textContent, "Estimated progress: 60%", "sample loading percent follows loaded bytes when total bytes are known");
+  assert.equal(elements.bytes.textContent, "70 B / 100 B", "sample loading keeps byte details visible");
+}
+
+{
+  const elements = progressElements();
+  const timers = [];
+  const controller = progressController(elements, timers);
+  controller.start(10);
+  controller.complete(10);
+  assert.equal(elements.percent.textContent, "100%", "completion shows 100 percent once");
+  assert.equal(elements.label.textContent, "Dataset ready", "completion shows ready text");
+  timers.forEach((callback) => callback?.());
+  assert.equal(elements.root.hidden, true, "completion hides progress UI after the delay");
+
+  controller.start(11);
+  controller.complete(11);
+  controller.start(12);
+  timers.forEach((callback) => callback?.());
+  assert.equal(elements.root.hidden, false, "old completion timer does not hide a new dataset load");
+}
+
+{
+  const elements = progressElements();
+  const controller = progressController(elements);
+  controller.start(21);
+  controller.fail(21, new Error("broken"));
+  assert.equal(elements.root.classList.contains("is-error"), true, "error state is displayed");
+  assert.equal(elements.label.textContent, "Dataset loading failed", "error stage is displayed");
+
+  controller.start(22);
+  const abort = new DOMException("aborted", "AbortError");
+  assert.equal(controller.fail(22, abort), false, "AbortError is not displayed as a dataset failure");
+  assert.equal(elements.root.classList.contains("is-error"), false, "AbortError does not set error state");
+}
+
+await withMockFetch(
+  async () => new Response(new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(encoder.encode("abc"));
+      controller.enqueue(encoder.encode("def"));
+      controller.close();
+    }
+  }), {
+    status: 200,
+    headers: { "content-length": "6" }
+  }),
+  async () => {
+    const events = [];
+    const buffer = await fetchArrayBufferWithProgress("https://example.test/data.bin", (event) => {
+      events.push(event);
+    });
+    assert.equal(buffer.byteLength, 6, "fetchWithProgress returns the fetched ArrayBuffer");
+    assert.equal(events.at(-1).loadedBytes, 6, "fetchWithProgress reports loaded bytes");
+    assert.equal(events.at(-1).totalBytes, 6, "fetchWithProgress reports total bytes from Content-Length");
+    assert.equal(events.at(-1).percent, 100, "fetchWithProgress reports determinate percent");
+    assert.equal(events.at(-1).mode, "determinate", "fetchWithProgress reports determinate mode");
+  }
+);
+
+await withMockFetch(
+  async () => new Response(new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(encoder.encode("abcdef"));
+      controller.close();
+    }
+  }), { status: 200 }),
+  async () => {
+    const events = [];
+    const buffer = await fetchArrayBufferWithProgress("https://example.test/no-length.bin", (event) => {
+      events.push(event);
+    });
+    assert.equal(buffer.byteLength, 6, "fetchWithProgress handles stream bodies without Content-Length");
+    assert.equal(events.at(-1).totalBytes, null, "missing Content-Length keeps total bytes unknown");
+    assert.equal(events.at(-1).percent, null, "missing Content-Length does not produce a fake percent");
+    assert.equal(events.at(-1).mode, "indeterminate", "missing Content-Length uses indeterminate mode");
+  }
+);
+
+await withMockFetch(
+  async () => new Response(null, { status: 200 }),
+  async () => {
+    const events = [];
+    const buffer = await fetchArrayBufferWithProgress("https://example.test/empty.bin", (event) => {
+      events.push(event);
+    });
+    assert.equal(buffer.byteLength, 0, "fetchWithProgress handles empty bodies");
+    assert.equal(events.at(-1).loadedBytes, 0, "empty body reports zero loaded bytes");
+    assert.equal(events.at(-1).percent, null, "empty body does not create a percent without a positive total");
+  }
+);
+
+await withMockFetch(
+  async () => new Response("missing", { status: 404 }),
+  async () => {
+    await assert.rejects(
+      () => fetchArrayBufferWithProgress("https://example.test/missing.bin", () => {}),
+      /HTTP 404/,
+      "fetchWithProgress rejects HTTP errors"
+    );
+  }
+);
 
 assert.deepEqual(
   getWebRChannelSupport({
@@ -371,19 +657,27 @@ assert.equal(RESULT_COLUMN_LABELS.control_tpm_median, "Control TPM median");
 assert.equal(RESULT_COLUMN_LABELS.treatment_tpm_median, "Treatment TPM median");
 assert.equal(RESULT_COLUMN_LABELS.arabidopsis_homolog, "Arabidopsis homolog");
 assert.equal(RESULT_COLUMN_LABELS.rice_homolog, "Rice homolog");
-assert.equal(APP_CONFIG.appVersion, "20260717");
+assert.equal(APP_CONFIG.appVersion, "20260727");
+assert.equal(DEFAULT_PARAMETERS.sfType, "ratio");
+assert.equal(DEFAULT_PARAMETERS.cooksCutoff, true);
+assert.match(indexHtml, /<option value="ratio" selected>ratio<\/option>/);
+assert.match(indexHtml, /<option value="true" selected>TRUE<\/option>/);
 assert.equal(DEFAULT_PARAMETERS.test, "Wald");
 assert.equal(Object.hasOwn(DEFAULT_PARAMETERS, "parallel"), false);
 assert.match(indexHtml, />Run DEG analysis<\/button>/);
 assert.match(indexHtml, />Stop analysis<\/button>/);
 assert.match(indexHtml, /STEP 1\.[\s\S]*?Select data/);
-assert.match(indexHtml, /id="controlSelector"[^>]*>[\s\S]*?STEP 2\. Select control samples/);
-assert.match(indexHtml, /id="treatmentSelector"[^>]*>[\s\S]*?STEP 3\. Select treatment samples/);
-assert.match(indexHtml, /STEP 4\.[\s\S]*?Set analysis parameters/);
+assert.match(indexHtml, /STEP 2\.[\s\S]*?Select analysis design/);
+assert.match(indexHtml, /Two-group comparison/);
+assert.match(indexHtml, /Multi-group comparison/);
+assert.match(indexHtml, /id="controlSelector"[^>]*>[\s\S]*?STEP 3\. Select control samples/);
+assert.match(indexHtml, /id="treatmentSelector"[^>]*>[\s\S]*?STEP 4\. Select treatment samples/);
+assert.match(indexHtml, /id="multiGroupSection"[\s\S]*?STEP 3\.[\s\S]*?Build multi-group comparison/);
+assert.match(indexHtml, /STEP 5\.[\s\S]*?Set analysis parameters/);
 assert.match(indexHtml, /id="analysisEngine"[\s\S]*?R \/ DESeq2 \(standard\)/);
-assert.match(indexHtml, /High-speed edgeR-like Z-test/);
+assert.match(indexHtml, /High-speed pairwise Z-test/);
 assert.match(indexHtml, /id="p-mode"[\s\S]*?FDR \(Benjamini-Hochberg\)/);
-assert.match(indexHtml, /STEP 5\.[\s\S]*?Select plots/);
+assert.match(indexHtml, /STEP 6\.[\s\S]*?Select plots/);
 assert.doesNotMatch(indexHtml, /DESeq2-normalized count boxplot/);
 assert.match(indexHtml, /Use a raw integer count matrix/);
 assert.match(indexHtml, /Put Gene ID in the first column and sample names in all remaining columns/);
@@ -416,9 +710,19 @@ assert.match(appSource, /el\.analysisActivity\.hidden = true/);
 assert.match(appSource, /window\.location\.reload\(\)/);
 assert.match(appSource, /Building upload count matrix/);
 assert.match(appSource, /buildBinaryCountMatrixFromUpload\(state\.uploaded, allSamples\)/);
+assert.match(appSource, /runMultiGroupDeseqAnalysis/);
+assert.match(appSource, /Building binary multi-group count matrix/);
+assert.match(appSource, /Building uploaded binary multi-group count matrix/);
 assert.doesNotMatch(appSource, /buildCountCsvFromUpload\(state\.uploaded, allSamples\)/);
 assert.match(runnerSource, /const stagedMatrixRun = Boolean\(countMatrix\)/);
 assert.match(runnerSource, /Uploaded count matrix uses staged PostMessage compatibility mode/);
+assert.match(multiGroupRunnerSource, /const stagedMatrixRun = Boolean\(countMatrix\)/);
+assert.match(multiGroupRunnerSource, /runStagedMultiGroupDeseq2/);
+assert.match(multiGroupRunnerSource, /PostMessage compatibility mode/);
+assert.match(multiGroupStagedRunnerSource, /readBin/);
+assert.match(multiGroupStagedRunnerSource, /DESeq2::nbinomLRT/);
+assert.match(multiGroupStagedRunnerSource, /DESeq2::nbinomWaldTest/);
+assert.match(multiGroupStagedRunnerSource, /error\.rAnalysisError = true/);
 assert.doesNotMatch(runnerSource, /safetyFilter|samplesAtSafetyCount|Browser safety filter|count_matrix >= browser_safety_min_count/);
 assert.match(runnerSource, /browser_safety_filter: "FALSE"/);
 assert.match(runnerSource, /estimateDispersionsGeneEst/);
@@ -478,7 +782,7 @@ const expectedExternalFiles = new Map([
   ["pearl_millet__843B", ["Pearl_millet_count_data_cv_843B.csv.gz", "Pearl_millet_TPM_data_cv_843B.csv.gz", "Pearl_millet_gene_length_cv_843B.tsv", "Pearl_millet_annotation_cv_843B.tsv"]],
   ["pearl_millet__tift", ["Pearl_millet_count_data_cv_Tift.csv.gz", "Pearl_millet_TPM_data_cv_Tift.csv.gz", "Pearl_millet_gene_length_cv_Tift.tsv", "Pearl_millet_annotation_cv_Tift.tsv"]],
   ["proso_millet", ["Proso_millet_count_data.csv.gz", "Proso_millet_TPM_data.csv.gz", "Proso_millet_gene_length.tsv", "Proso_millet_annotation.tsv"]],
-  ["rice", ["rice_count_data.csv.gz", "rice_TPM_data.csv.gz", "Rice_gene_length.tsv", "rice_annotation.tsv"]],
+  ["rice", ["Rice_count_data.csv.gz", "Rice_TPM_data.csv.gz", "Rice_gene_length.tsv", "rice_annotation.tsv"]],
   ["sorghum", ["Sorghum_count_data.csv.gz", "Sorghum_TPM_data.csv.gz", "Sorghum_gene_length.tsv", "Sorghum_annotation.tsv"]]
 ]);
 assert.equal(APP_CONFIG.externalDataBaseUrl, "/RNADB/Download/files/");
@@ -754,5 +1058,237 @@ assert.equal(csvOnlyBundle.dataset.tpmUrl.endsWith("/test-virtual/csv-only/tpm.c
 assert.equal(csvOnlyBundle.dataset.tpmFallbackUrl, null);
 const csvOnlyAnnotations = await loadAnnotations(csvOnlyBundle);
 assert.equal(csvOnlyAnnotations.byGene.get("gene0001").rice_homolog, "OsDemo1");
+
+const structuredCsvOnlyDataset = {
+  ...csvOnlyDataset,
+  id: "example_fixture_csv_only_structured",
+  countFile: "count.csv.gz",
+  tpmFile: "tpm.csv.gz",
+  annotationFile: "annotation.tsv",
+  dataBaseUrl: "./test-virtual/csv-only/"
+};
+delete structuredCsvOnlyDataset.countUrl;
+delete structuredCsvOnlyDataset.tpmUrl;
+delete structuredCsvOnlyDataset.annotationUrl;
+const structuredProgress = [];
+const structuredBundle = await loadDatasetBundle(
+  structuredCsvOnlyDataset,
+  (event) => structuredProgress.push(event),
+  { structuredProgress: true }
+);
+assert.equal(structuredBundle.sampleRows.length, csvOnlyBundle.sampleRows.length, "structured progress preserves dataset sample count");
+assert.equal(structuredBundle.genes.length, csvOnlyBundle.genes.length, "structured progress preserves dataset gene count");
+assert.equal(structuredBundle.directMatrix.countRowsBySampleId.size, 0, "structured progress does not retain Step 1 count rows");
+assert.ok(structuredProgress.every((event) => typeof event === "object"), "structured progress emits structured events when requested");
+assert.ok(
+  structuredProgress.some((event) => event.stage === "Preparing count matrix header"),
+  "structured progress includes count header stage"
+);
+const structuredCountVectors = await loadSelectedCountVectors(structuredBundle, csvOnlySamples);
+assert.equal(structuredCountVectors.get("control_1")[0], 100, "structured progress preserves selected count vectors");
+structuredCountVectors.clear();
+
+const structuredGzipStreamDataset = {
+  ...rawDataset,
+  id: "example_fixture_gzip_stream_structured",
+  sampleCount: virtualSampleRows.length
+};
+delete structuredGzipStreamDataset.sampleMetadataUrl;
+delete structuredGzipStreamDataset.geneListUrl;
+delete structuredGzipStreamDataset.tpmBaseUrl;
+delete structuredGzipStreamDataset.tpmVectorManifestUrl;
+delete structuredGzipStreamDataset.tpmVectorFormat;
+const gzipStreamProgress = [];
+const gzipStreamBundle = await loadDatasetBundle(
+  structuredGzipStreamDataset,
+  (event) => gzipStreamProgress.push(event),
+  { structuredProgress: true }
+);
+assert.equal(gzipStreamBundle.sampleRows.length, rawBundle.sampleRows.length, "gzip stream load preserves sample count");
+assert.equal(gzipStreamBundle.genes.length, rawBundle.genes.length, "gzip stream load preserves gene count");
+assert.ok(
+  gzipStreamProgress.some((event) => event.stage === "Decompressing data"),
+  "structured progress includes decompression stage for gzip count matrix"
+);
+assert.ok(
+  gzipStreamProgress.some((event) =>
+    event.stage === "Now loading datasets..." &&
+    Number.isFinite(event.loadedBytes) &&
+    Number.isFinite(event.totalBytes) &&
+    event.totalBytes > 0 &&
+    Number.isFinite(event.percent)
+  ),
+  "structured progress includes byte-based loading progress for streamed count matrix"
+);
+assert.ok(
+  gzipStreamProgress.some((event) =>
+    event.stage === "Now loading datasets..." &&
+    /samples/.test(event.message) &&
+    event.mode === "determinate" &&
+    Number.isFinite(event.percent) &&
+    event.percent > 0
+  ),
+  "structured progress includes sample-count fallback progress for streamed count matrix"
+);
+
+{
+  const abortedDataset = {
+    ...structuredCsvOnlyDataset,
+    id: "example_fixture_csv_only_abort"
+  };
+  delete abortedDataset.countUrl;
+  const abortController = new AbortController();
+  abortController.abort();
+  await assert.rejects(
+    () => loadDatasetBundle(abortedDataset, () => {}, {
+      structuredProgress: true,
+      signal: abortController.signal
+    }),
+    (error) => error?.name === "AbortError",
+    "aborted dataset load rejects with AbortError"
+  );
+}
+
+{
+  const samples = {
+    A1: { sample_id: "A1", BioProject: "BP1" },
+    A2: { sample_id: "A2", BioProject: "BP1" },
+    B1: { sample_id: "B1", BioProject: "BP1" },
+    B2: { sample_id: "B2", BioProject: "BP1" },
+    C1: { sample_id: "C1", BioProject: "BP1" },
+    C2: { sample_id: "C2", BioProject: "BP1" }
+  };
+  const geneNames = ["gene_up_b", "gene_up_c", "gene_flat", "gene_low"];
+  const vectorsMap = new Map([
+    ["A1", new Float64Array([10, 10, 25, 0])],
+    ["A2", new Float64Array([12, 11, 26, 0])],
+    ["B1", new Float64Array([90, 10, 24, 0])],
+    ["B2", new Float64Array([88, 12, 25, 0])],
+    ["C1", new Float64Array([12, 95, 27, 0])],
+    ["C2", new Float64Array([11, 92, 25, 0])]
+  ]);
+  const parameters = {
+    minimumCount: 1,
+    fdrThreshold: 0.99,
+    log2FoldChangeThreshold: 0.1
+  };
+  const groups = [
+    { id: "g1", label: "A", samples: [samples.A1, samples.A2] },
+    { id: "g2", label: "B", samples: [samples.B1, samples.B2] },
+    { id: "g3", label: "C", samples: [samples.C1, samples.C2] }
+  ];
+  const contrasts = [
+    { id: "g2_vs_g1", numeratorId: "g2", denominatorId: "g1", numeratorLabel: "B", denominatorLabel: "A", label: "B vs A" },
+    { id: "g3_vs_g1", numeratorId: "g3", denominatorId: "g1", numeratorLabel: "C", denominatorLabel: "A", label: "C vs A" },
+    { id: "g3_vs_g2", numeratorId: "g3", denominatorId: "g2", numeratorLabel: "C", denominatorLabel: "B", label: "C vs B" }
+  ];
+
+  const directBvA = runPairwiseZTest({
+    geneNames,
+    vectorsMap,
+    numeratorSamples: groups[1].samples,
+    denominatorSamples: groups[0].samples,
+    parameters,
+    pAdjustmentMode: "fdr"
+  });
+  const multi = runMultiGroupFastAnalysis({
+    geneNames,
+    vectorsMap,
+    groups,
+    contrasts,
+    parameters,
+    pAdjustmentMode: "fdr"
+  });
+
+  assert.equal(MAX_MULTI_GROUP_CONTRASTS, 12, "multi-group contrast cap is exported");
+  assert.deepEqual(
+    multi.contrasts[0].rows,
+    directBvA.resultRows,
+    "multi-group ultrafast B vs A reuses the same pairwise Z-test calculation as two-group"
+  );
+  assert.ok(
+    Number(multi.contrasts[0].rows.find((row) => row.gene_id === "gene_up_b").log2FoldChange) > 0,
+    "positive log2FC points toward the numerator group"
+  );
+  assert.ok(
+    Number(multi.contrasts[2].rows.find((row) => row.gene_id === "gene_up_b").log2FoldChange) < 0,
+    "C vs B is negative for a B-up gene"
+  );
+
+  const reversed = runMultiGroupFastAnalysis({
+    geneNames,
+    vectorsMap,
+    groups,
+    contrasts: contrasts.slice().reverse(),
+    parameters,
+    pAdjustmentMode: "fdr"
+  });
+  assert.deepEqual(
+    reversed.contrasts.find((contrast) => contrast.id === "g2_vs_g1").rows,
+    multi.contrasts.find((contrast) => contrast.id === "g2_vs_g1").rows,
+    "contrast order does not change per-contrast ultrafast results"
+  );
+
+  const colDataCsv = buildGroupedColDataCsv(groups);
+  assert.match(colDataCsv, /^sample,group\r\nA1,g1\r\nA2,g1/m, "grouped colData uses stable internal group IDs");
+  assert.doesNotMatch(colDataCsv, /Treatment|Control/, "grouped colData does not use display labels");
+
+  const matrixInput = buildBinaryCountMatrixFromVectors(
+    geneNames,
+    groups.flatMap((group) => group.samples),
+    vectorsMap
+  );
+  const stagedStages = buildStagedMultiGroupDeseq2Stages({
+    stateName: ".browser_multi_unit",
+    paths: {
+      countsPath: "/tmp/counts.bin",
+      geneIdsPath: "/tmp/gene_ids.txt",
+      globalResultPath: "/tmp/global.csv",
+      normalizedPath: "/tmp/normalized.csv",
+      normalizedSummaryPath: "/tmp/normalized_summary.csv",
+      sizeFactorPath: "/tmp/size_factors.csv",
+      summaryPath: "/tmp/summary.csv",
+      logPath: "/tmp/analysis.log",
+      pcaPath: "/tmp/pca.csv",
+      correlationPath: "/tmp/correlation.csv",
+      distancePath: "/tmp/distance.csv",
+      dispersionPath: "/tmp/dispersion.csv"
+    },
+    parameters: {
+      minimumCount: 1,
+      preFiltering: true,
+      sfType: "poscounts",
+      fitType: "parametric",
+      cooksCutoff: false,
+      fdrThreshold: 0.05,
+      independentFiltering: true
+    },
+    plots: {
+      dispersion: false,
+      pca: false,
+      sampleCorrelation: false,
+      sampleDistance: false
+    },
+    matrixInput,
+    groups,
+    contrasts,
+    contrastPaths: Object.fromEntries(contrasts.map((contrast) => [contrast.id, `/tmp/${contrast.id}.csv`])),
+    runGlobal: true
+  });
+  assert.equal(stagedStages.length, 9, "multi-group staged DESeq2 uses discrete R stages");
+  assert.match(stagedStages.map(([, code]) => code).join("\n"), /readBin[\s\S]*nbinomLRT[\s\S]*nbinomWaldTest/);
+
+  const directionMatrix = buildDirectionMatrix(multi.contrasts);
+  assert.equal(directionMatrix.length, geneNames.length, "direction matrix has one row per gene");
+  assert.ok("g2_vs_g1" in directionMatrix[0], "direction matrix has one column per contrast");
+
+  const upB = buildGeneSet(multi.contrasts[0], "Up");
+  const upC = buildGeneSet(multi.contrasts[1], "Up");
+  const intersections = computeExclusiveIntersections([
+    { label: "B vs A Up", genes: upB },
+    { label: "C vs A Up", genes: upC }
+  ]);
+  assert.ok(intersections.some((entry) => entry.membership[0] && !entry.membership[1]), "exclusive intersections include set-specific genes");
+}
 
 console.log("unit tests passed");

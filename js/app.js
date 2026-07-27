@@ -2,7 +2,7 @@ import {
   APP_CONFIG,
   DEFAULT_PARAMETERS,
   DEFAULT_PLOTS
-} from "./config.js?v=20260717-gene-length";
+} from "./config.js?v=20260727";
 import {
   buildColDataCsv,
   buildCountCsvFromVectors,
@@ -17,11 +17,23 @@ import {
   buildBinaryCountMatrixFromUpload,
   buildBinaryCountMatrixFromVectors,
   runDeseqAnalysis
-} from "./deseq-runner.js?v=20260717-gene-length";
+} from "./deseq-runner.js?v=20260727-defaults";
+import { runPairwiseZTest } from "./fast-ztest.js";
+import {
+  buildGroupedColDataCsv,
+  MultiGroupController
+} from "./multi-group-controller.js";
+import { runMultiGroupFastAnalysis } from "./multi-group-fast-runner.js";
+import { runMultiGroupDeseqAnalysis } from "./multi-group-runner.js?v=20260727-defaults";
+import {
+  addGroupedTpmAndAnnotations,
+  enrichMultiGroupResult,
+  renderMultiGroupResults
+} from "./multi-group-results.js";
 import { renderPlots } from "./plots.js";
 import { ResultTable } from "./result-table.js";
 import { SampleSelector } from "./sample-selector.js";
-import { webrManager } from "./webr-manager.js?v=wald-lrt";
+import { webrManager } from "./webr-manager.js?v=20260727-defaults";
 import {
   classifyDirection,
   countBy,
@@ -32,6 +44,7 @@ import {
   summarizeValues,
   unique
 } from "./utils.js";
+import { createDatasetLoadProgressController } from "./dataset-progress.js";
 
 const state = {
   mode: "gexa",
@@ -39,8 +52,10 @@ const state = {
   bundle: null,
   sampleRows: [],
   uploaded: null,
+  analysisDesign: "two_group",
   controlSelector: null,
   treatmentSelector: null,
+  multiGroupController: null,
   resultTable: null,
   cancelled: false,
   lastResult: null,
@@ -49,7 +64,10 @@ const state = {
   analysisStageStartedAt: 0,
   analysisStageKey: "",
   analysisTimer: null,
-  analysisControlStates: new Map()
+  analysisControlStates: new Map(),
+  datasetLoadId: 0,
+  datasetLoadAbortController: null,
+  datasetLoadProgress: null
 };
 
 const el = {};
@@ -260,7 +278,18 @@ function setAnalysisControlsLocked(locked) {
   document.body.removeAttribute("aria-busy");
 }
 
-function setProgress(message) {
+function progressMessage(progress) {
+  if (typeof progress === "string") {
+    return progress;
+  }
+  if (progress && typeof progress === "object") {
+    return String(progress.message || progress.stage || "");
+  }
+  return String(progress || "");
+}
+
+function setProgress(progress) {
+  const message = progressMessage(progress);
   setText(el.progressStatus, message);
   appendAnalysisStage(message);
 }
@@ -286,6 +315,10 @@ function selectedSamples() {
 
 function selectedAnalysisEngine() {
   return $("analysisEngine")?.value || "deseq2";
+}
+
+function selectedAnalysisDesign() {
+  return state.analysisDesign || "two_group";
 }
 
 function readParameters() {
@@ -359,6 +392,14 @@ function hasGenePositiveInEverySample(genes, samples, vectorsBySample) {
 }
 
 function selectedBioProjects() {
+  if (selectedAnalysisDesign() === "multi_group") {
+    const validation = state.multiGroupController?.validate({
+      plots: readPlots(),
+      parameters: readParameters()
+    });
+    return validation?.bioProjects || [];
+  }
+
   const { control, treatment } = selectedSamples();
   return unique([...control, ...treatment].map((sample) => sample.BioProject));
 }
@@ -366,17 +407,43 @@ function selectedBioProjects() {
 function updateWarningsAndRunButton() {
   clearWarnings();
 
+  const parameters = readParameters();
+  const plots = readPlots();
+  const currentEngine = selectedAnalysisEngine();
+  const isJavascriptEngine = currentEngine === "javascript";
+  const engineLabel = isJavascriptEngine ? "High-speed Z-test" : "DESeq2";
+  const hasData = state.mode === "gexa"
+    ? Boolean(state.bundle)
+    : Boolean(state.uploaded);
+
+  if (selectedAnalysisDesign() === "multi_group") {
+    state.multiGroupController?.setEngine(currentEngine);
+    const validation = state.multiGroupController?.validate({ plots, parameters }) || {
+      ready: false,
+      errors: ["Multi-group controls are not ready."],
+      warnings: []
+    };
+
+    for (const error of validation.errors) {
+      appendWarning(error);
+    }
+    for (const warning of validation.warnings) {
+      appendWarning(warning);
+    }
+
+    el.runButton.disabled = state.analysisActive ||
+      !hasData ||
+      !validation.ready ||
+      !validParameters(parameters);
+    return;
+  }
+
   const { control, treatment } = selectedSamples();
   const controlIds = new Set(control.map((sample) => sample.sample_id));
   const treatmentIds = new Set(treatment.map((sample) => sample.sample_id));
   const overlap = [...controlIds].filter((id) => treatmentIds.has(id));
-  const parameters = readParameters();
-  const plots = readPlots();
   const totalSamples = control.length + treatment.length;
   const bioProjects = selectedBioProjects();
-  const currentEngine = selectedAnalysisEngine();
-  const isJavascriptEngine = currentEngine === "javascript";
-  const engineLabel = isJavascriptEngine ? "High-speed Z-test" : "DESeq2";
 
   if (control.length > 0 && control.length < 3) {
     appendWarning(`Control has fewer than 3 biological replicates. ${engineLabel} can run with 2, but 3 or more are recommended.`);
@@ -396,7 +463,7 @@ function updateWarningsAndRunButton() {
     }
 
     if (parameters.cooksCutoff && control.length >= 3 && treatment.length >= 3) {
-      appendWarning("Cook's cutoff can be memory intensive for 3 or more replicates per group in webR. If analysis fails, set Cooks cutoff to FALSE.");
+      appendWarning("Cook's cutoff can be memory intensive for 3 or more replicates per group in webR. If analysis fails, set Cook's cutoff to FALSE.");
     }
 
     if (totalSamples > 50 && (plots.sampleCorrelation || plots.sampleDistance)) {
@@ -407,10 +474,6 @@ function updateWarningsAndRunButton() {
       appendWarning("More than 100 samples selected. Heatmap generation may be slow and memory intensive.");
     }
   }
-
-  const hasData = state.mode === "gexa"
-    ? Boolean(state.bundle)
-    : Boolean(state.uploaded);
 
   const ready = hasData &&
     control.length >= 2 &&
@@ -448,52 +511,142 @@ function renderDatasetInfo(dataset, bundle = null) {
   el.datasetInfo.append(dl);
 }
 
+function abortCurrentDatasetLoad() {
+  if (!state.datasetLoadAbortController) {
+    return;
+  }
+
+  state.datasetLoadAbortController.abort();
+  state.datasetLoadAbortController = null;
+}
+
+function handleDatasetLoadProgress(loadId, progress) {
+  if (loadId !== state.datasetLoadId) {
+    return;
+  }
+
+  setProgress(progress);
+  state.datasetLoadProgress?.update(loadId, progress);
+}
+
 async function loadSelectedDataset() {
+  abortCurrentDatasetLoad();
+  const loadId = state.datasetLoadId + 1;
+  state.datasetLoadId = loadId;
+
   const datasetId = el.datasetSelect.value;
   const dataset = state.catalog.datasets.find((entry) => entry.id === datasetId);
 
   if (!dataset) {
     state.bundle = null;
     state.sampleRows = [];
+    state.datasetLoadProgress?.reset();
     renderDatasetInfo(null);
     setSampleRows([]);
     updateWarningsAndRunButton();
     return;
   }
 
+  const abortController = new AbortController();
+  state.datasetLoadAbortController = abortController;
   el.datasetSelect.disabled = true;
+  el.errorPanel.hidden = true;
   setProgress("Loading samples from selected dataset");
   renderDatasetInfo(dataset);
   el.datasetInfo.textContent = "Loading sample metadata for this dataset. Large datasets may take a little while...";
+  state.datasetLoadProgress?.start(loadId, {
+    message: "Preparing dataset...",
+    stage: "Preparing dataset...",
+    mode: "indeterminate"
+  });
 
   try {
-    state.bundle = await loadDatasetBundle(dataset, setProgress);
-    state.bundle.sampleRows = Array.isArray(state.bundle.samples)
-      ? state.bundle.samples
-      : state.bundle.samples.samples;
-    state.sampleRows = state.bundle.sampleRows;
-    renderDatasetInfo(dataset, state.bundle);
+    const bundle = await loadDatasetBundle(
+      dataset,
+      (progress) => handleDatasetLoadProgress(loadId, progress),
+      {
+        signal: abortController.signal,
+        structuredProgress: true
+      }
+    );
+
+    if (loadId !== state.datasetLoadId) {
+      return;
+    }
+
+    bundle.sampleRows = Array.isArray(bundle.samples)
+      ? bundle.samples
+      : bundle.samples.samples;
+    state.bundle = bundle;
+    state.sampleRows = bundle.sampleRows;
+    renderDatasetInfo(dataset, bundle);
     setSampleRows(state.sampleRows);
     setProgress(`Dataset ready: ${state.sampleRows.length.toLocaleString()} samples loaded`);
+    state.datasetLoadProgress?.complete(loadId, {
+      message: "Dataset ready",
+      stage: "Dataset ready",
+      mode: "determinate",
+      percent: 100
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      state.datasetLoadProgress?.reset(loadId);
+      return;
+    }
+
+    if (loadId !== state.datasetLoadId) {
+      return;
+    }
+
+    state.bundle = null;
+    state.sampleRows = [];
+    setSampleRows([]);
+    setProgress("Dataset load failed");
+    state.datasetLoadProgress?.fail(loadId, error);
+    el.datasetInfo.textContent = "Dataset metadata could not be loaded. Check the error message below.";
+    el.errorPanel.hidden = false;
+    el.errorText.textContent = formatError(error);
   } finally {
-    el.datasetSelect.disabled = false;
+    if (loadId === state.datasetLoadId) {
+      el.datasetSelect.disabled = false;
+      state.datasetLoadAbortController = null;
+      updateWarningsAndRunButton();
+    }
   }
 }
 
 function setSampleRows(rows) {
   state.controlSelector.setRows(rows);
   state.treatmentSelector.setRows(rows);
+  state.multiGroupController?.setRows(rows);
   updateWarningsAndRunButton();
 }
 
 function handleModeChange() {
   state.mode = document.querySelector('input[name="data-mode"]:checked').value;
+  if (state.mode !== "gexa") {
+    abortCurrentDatasetLoad();
+    state.datasetLoadId += 1;
+    state.datasetLoadProgress?.reset();
+  }
   el.gexaPanel.hidden = state.mode !== "gexa";
   el.uploadPanel.hidden = state.mode !== "upload";
   state.sampleRows = state.mode === "gexa"
     ? state.bundle?.sampleRows || []
     : state.uploaded?.sampleRows || [];
   setSampleRows(state.sampleRows);
+  updateWarningsAndRunButton();
+}
+
+function handleAnalysisDesignChange() {
+  state.analysisDesign = document.querySelector('input[name="analysis-design"]:checked')?.value || "two_group";
+  const multiGroup = state.analysisDesign === "multi_group";
+
+  el.twoGroupControlSection.hidden = multiGroup;
+  el.twoGroupTreatmentSection.hidden = multiGroup;
+  el.multiGroupSection.hidden = !multiGroup;
+
+  estimateMemory();
   updateWarningsAndRunButton();
 }
 
@@ -560,8 +713,15 @@ async function handleUploadFile() {
 }
 
 function estimateMemory() {
-  const { control, treatment } = selectedSamples();
-  const sampleCount = control.length + treatment.length;
+  const sampleCount = selectedAnalysisDesign() === "multi_group"
+    ? state.multiGroupController?.validate({
+        plots: readPlots(),
+        parameters: readParameters()
+      }).totalSamples || 0
+    : (() => {
+        const { control, treatment } = selectedSamples();
+        return control.length + treatment.length;
+      })();
   const geneCount = state.mode === "gexa"
     ? state.bundle?.genes?.length || 0
     : state.uploaded?.geneCount || 0;
@@ -687,20 +847,6 @@ function renderSummaryCards(rows, summary, selected) {
   }
 }
 
-function errorFunction(x) {
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
-  const sign = x < 0 ? -1 : 1;
-  const absX = Math.abs(x);
-  const t = 1.0 / (1.0 + p * absX);
-  const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
-  return sign * y;
-}
-
 function getTargetMatrixDataForJS(allSamples) {
   let geneNames = [];
   const sampleIds = allSamples.map(sampleId);
@@ -735,130 +881,17 @@ function getTargetMatrixDataForJS(allSamples) {
 
 function runFastJsEngine(selected, parameters, inputGeneCount) {
   const allSamples = [...selected.control, ...selected.treatment];
-  const { geneNames, sampleIds, vectorsMap } = getTargetMatrixDataForJS(allSamples);
+  const { geneNames, vectorsMap } = getTargetMatrixDataForJS(allSamples);
 
-  if (geneNames.length === 0 || sampleIds.length === 0) {
-    throw new Error("No data matrix records allocated inside browser context.");
-  }
-
-  const numSamples = sampleIds.length;
-  const librarySizes = {};
-  sampleIds.forEach((id) => {
-    const vec = vectorsMap.get(id) || [];
-    let sum = 0;
-    for (let i = 0; i < vec.length; i += 1) {
-      sum += vec[i];
-    }
-    librarySizes[id] = sum;
+  return runPairwiseZTest({
+    geneNames,
+    vectorsMap,
+    numeratorSamples: selected.treatment,
+    denominatorSamples: selected.control,
+    parameters,
+    pAdjustmentMode: $("p-mode")?.value || "fdr",
+    inputGeneCount
   });
-
-  const totalLibSum = Object.values(librarySizes).reduce((a, b) => a + b, 0);
-  const avgLibSize = totalLibSum / numSamples || 1;
-  const priorCount = 2.0;
-
-  const pModeElement = $("p-mode");
-  const pMode = pModeElement ? pModeElement.value : "fdr";
-
-  const results = [];
-  let genesAfterPrefiltering = 0;
-
-  for (let g = 0; g < geneNames.length; g += 1) {
-    const gene = geneNames[g];
-    let geneTotalCount = 0;
-    sampleIds.forEach((id) => {
-      geneTotalCount += (vectorsMap.get(id)?.[g] || 0);
-    });
-
-    if (geneTotalCount < parameters.minimumCount) {
-      results.push({
-        gene_id: gene,
-        baseMean: (geneTotalCount / numSamples),
-        log2FoldChange: NaN,
-        lfcSE: NaN,
-        stat: NaN,
-        pvalue: NaN,
-        padj: NaN,
-        direction: "Filtered / NA"
-      });
-      continue;
-    }
-
-    genesAfterPrefiltering += 1;
-
-    const log2CpmMap = {};
-    sampleIds.forEach((id) => {
-      const count = vectorsMap.get(id)?.[g] || 0;
-      const L_s = librarySizes[id] || 1;
-      const adjPrior = priorCount * (L_s / avgLibSize);
-      log2CpmMap[id] = Math.log2(((count + adjPrior) / (L_s + 2 * adjPrior)) * 1000000);
-    });
-
-    const calcStats = (samples) => {
-      const vals = samples.map((sample) => log2CpmMap[sampleId(sample)] || 0);
-      const n = vals.length;
-      const mean = vals.reduce((a, b) => a + b, 0) / n;
-      let variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1);
-      if (isNaN(variance) || variance < 0.01) {
-        variance = 0.01;
-      }
-      return { mean, var: variance, n };
-    };
-
-    const ctrl = calcStats(selected.control);
-    const treat = calcStats(selected.treatment);
-    const log2FC = treat.mean - ctrl.mean;
-
-    const bottomValue = (ctrl.var / ctrl.n) + (treat.var / treat.n);
-    const safeBottom = isNaN(bottomValue) || bottomValue < 1e-5 ? 1e-5 : bottomValue;
-
-    const zStat = (treat.mean - ctrl.mean) / Math.sqrt(safeBottom);
-    let rawP = 1 - errorFunction(Math.abs(zStat) / Math.sqrt(2));
-    if (isNaN(rawP)) {
-      rawP = 1.0;
-    }
-
-    results.push({
-      gene_id: gene,
-      baseMean: (geneTotalCount / numSamples),
-      log2FoldChange: log2FC,
-      lfcSE: Math.sqrt(safeBottom),
-      stat: zStat,
-      pvalue: rawP,
-      padj: rawP,
-      direction: "NS"
-    });
-  }
-
-  const validTests = results.filter((row) => row.direction !== "Filtered / NA");
-  const totalTests = validTests.length;
-
-  if (totalTests > 0) {
-    if (pMode === "bonferroni") {
-      validTests.forEach((row) => {
-        row.padj = Math.min(1.0, row.pvalue * totalTests);
-      });
-    } else if (pMode === "fdr") {
-      const sortedList = validTests.map((row, originalIdx) => ({ r: row, originalIdx }));
-      sortedList.sort((a, b) => a.r.pvalue - b.r.pvalue);
-
-      let minFdr = 1.0;
-      for (let i = totalTests - 1; i >= 0; i -= 1) {
-        const rank = i + 1;
-        const fdrValue = (sortedList[i].r.pvalue * totalTests) / rank;
-        minFdr = Math.min(minFdr, fdrValue);
-        sortedList[i].r.padj = Math.max(sortedList[i].r.pvalue, minFdr);
-      }
-    }
-  }
-
-  return {
-    resultRows: results,
-    summary: {
-      input_genes: inputGeneCount,
-      genes_after_prefiltering: genesAfterPrefiltering,
-      tested_genes: totalTests
-    }
-  };
 }
 
 async function runJavascriptAnalysis({ selected, parameters, allSamples, inputGeneCount }) {
@@ -913,6 +946,233 @@ function renderAnalysisLog(logText, warnings) {
     ...warnings.map((warning) => `Warning: ${warning}`)
   ];
   el.analysisLog.textContent = lines.join("\n");
+}
+
+function allSamplesFromGroups(groups) {
+  return groups.flatMap((group) => group.samples);
+}
+
+async function runMultiGroupJavascriptAnalysis({
+  validation,
+  parameters,
+  allSamples,
+  inputGeneCount
+}) {
+  const startedAt = performance.now();
+  let vectors = null;
+  let originalVectorsBySample;
+  let hadOriginalVectorsBySample = false;
+
+  if (state.mode === "gexa") {
+    setProgress("Loading selected count files");
+    vectors = await loadSelectedCountVectors(state.bundle, allSamples, setProgress);
+    hadOriginalVectorsBySample = Object.prototype.hasOwnProperty.call(state.bundle, "vectorsBySample");
+    originalVectorsBySample = state.bundle.vectorsBySample;
+    state.bundle.vectorsBySample = vectors;
+  }
+
+  try {
+    if (state.cancelled) {
+      throw new Error("Analysis was cancelled before the ultrafast multi-group test started.");
+    }
+
+    const { geneNames, vectorsMap } = getTargetMatrixDataForJS(allSamples);
+    setProgress("Running ultrafast pairwise Z-tests");
+    const result = runMultiGroupFastAnalysis({
+      geneNames,
+      vectorsMap,
+      groups: validation.groups,
+      contrasts: validation.contrasts,
+      parameters,
+      pAdjustmentMode: $("p-mode")?.value || "fdr",
+      inputGeneCount
+    });
+    result.summary.execution_time_seconds = (performance.now() - startedAt) / 1000;
+    return result;
+  } finally {
+    if (state.mode === "gexa") {
+      if (hadOriginalVectorsBySample) {
+        state.bundle.vectorsBySample = originalVectorsBySample;
+      } else {
+        delete state.bundle.vectorsBySample;
+      }
+      vectors?.clear();
+    }
+  }
+}
+
+async function runMultiGroupAnalysis() {
+  const parameters = readParameters();
+  const plots = readPlots();
+  const currentEngine = selectedAnalysisEngine();
+  state.multiGroupController?.setEngine(currentEngine);
+  const validation = state.multiGroupController?.validate({ plots, parameters });
+  const allSamples = allSamplesFromGroups(validation?.groups || []);
+  const inputGeneCount = state.mode === "gexa"
+    ? state.bundle.genes.length
+    : state.uploaded.geneCount;
+
+  state.cancelled = false;
+  state.lastResult = null;
+  el.resultsSection.hidden = true;
+  el.errorPanel.hidden = true;
+  clearWarnings();
+  startAnalysisActivity({
+    sampleCount: allSamples.length,
+    inputGeneCount
+  });
+  setAnalysisControlsLocked(true);
+
+  let countVectorsForTpm = null;
+
+  try {
+    if (!validation?.ready) {
+      throw new Error((validation?.errors || ["Multi-group comparison is not ready."]).join("\n"));
+    }
+
+    let result;
+    if (currentEngine === "javascript") {
+      result = await runMultiGroupJavascriptAnalysis({
+        validation,
+        parameters,
+        allSamples,
+        inputGeneCount
+      });
+    } else {
+      let countCsv;
+      let countMatrix;
+
+      if (state.mode === "gexa") {
+        setProgress("Loading selected count files");
+        const vectors = await loadSelectedCountVectors(state.bundle, allSamples, setProgress);
+        countVectorsForTpm = vectors;
+        if (parameters.sfType === "ratio" && !hasGenePositiveInEverySample(state.bundle.genes, allSamples, vectors)) {
+          throw new Error([
+            "Size-factor estimation failed before starting multi-group DESeq2.",
+            "",
+            "The selected samples have no gene with positive counts in every selected sample.",
+            "DESeq2 sfType='ratio' requires at least one gene without zeros across all selected samples.",
+            "",
+            "Use Size-factor estimation: poscounts for sparse GExA matrices."
+          ].join("\n"));
+        }
+        if (state.cancelled) {
+          throw new Error("Analysis was cancelled before DESeq2 started.");
+        }
+        setProgress("Building binary multi-group count matrix");
+        countMatrix = buildBinaryCountMatrixFromVectors(state.bundle.genes, allSamples, vectors);
+      } else {
+        setProgress("Building uploaded binary multi-group count matrix");
+        countMatrix = buildBinaryCountMatrixFromUpload(state.uploaded, allSamples);
+      }
+
+      result = await runMultiGroupDeseqAnalysis({
+        countCsv,
+        countMatrix,
+        colDataCsv: buildGroupedColDataCsv(validation.groups),
+        groups: validation.groups,
+        contrasts: validation.contrasts,
+        parameters,
+        plots,
+        runGlobal: validation.runGlobal,
+        onProgress: setProgress
+      });
+    }
+
+    if (state.cancelled) {
+      setProgress("Analysis cancelled. Reload the page before starting another webR calculation.");
+      return;
+    }
+
+    const dataset = state.mode === "gexa" ? state.bundle.dataset : null;
+    const enrichmentWarnings = [];
+    enrichMultiGroupResult(result, parameters, dataset);
+
+    if (state.mode === "gexa") {
+      try {
+        enrichmentWarnings.push(...await addGroupedTpmAndAnnotations(
+          result,
+          state.bundle,
+          setProgress,
+          countVectorsForTpm
+        ));
+      } catch (error) {
+        enrichmentWarnings.push(`TPM/homolog enrichment was skipped: ${formatError(error)}`);
+      }
+    }
+
+    setProgress("Creating multi-group results");
+    state.lastResult = {
+      result,
+      parameters,
+      plots,
+      selected: validation.groups
+    };
+
+    renderMultiGroupResults({
+      containers: {
+        summaryCards: el.summaryCards,
+        resultTable: el.resultTable,
+        plotsContainer: el.plotsContainer,
+        downloadsContainer: el.downloadsContainer,
+        analysisLog: el.analysisLog
+      },
+      result,
+      parameters,
+      plots,
+      context: {
+        appVersion: APP_CONFIG.appVersion,
+        dataset: dataset || { id: "uploaded", species: "uploaded", reference: "matrix" }
+      },
+      analysisLogWarnings: enrichmentWarnings,
+      runtimeSummary: result.runtimeSummary || webrManager.getRuntimeSummary()
+    });
+
+    el.resultsSection.hidden = false;
+    setProgress("Completed");
+  } catch (error) {
+    if (state.cancelled) {
+      setProgress("Analysis stopped");
+      return;
+    }
+    console.error(error);
+    setProgress("Analysis failed");
+    el.errorPanel.hidden = false;
+    const runtimeSummary = currentEngine === "javascript"
+      ? {
+          channelType: "Native JavaScript Z-test",
+          crossOriginIsolated: window.crossOriginIsolated,
+          sharedArrayBufferAvailable: typeof SharedArrayBuffer === "function"
+        }
+      : webrManager.getRuntimeSummary();
+    el.errorText.textContent = [
+      "Multi-group analysis failed.",
+      "",
+      error.userMessage || formatError(error),
+      "",
+      `App version: ${APP_CONFIG.appVersion}`,
+      "Analysis design: Multi-group comparison",
+      `Analysis engine: ${currentEngine === "javascript" ? "Ultrafast pairwise Z-test" : "R / DESeq2"}`,
+      `Group count: ${validation?.groups?.length || 0}`,
+      `Groups: ${(validation?.groups || []).map((group) => `${group.label} (${group.samples.length})`).join(", ") || "NA"}`,
+      `Contrasts: ${(validation?.contrasts || []).map((contrast) => contrast.label).join("; ") || "NA"}`,
+      `Total selected samples: ${allSamples.length}`,
+      `Input genes: ${inputGeneCount}`,
+      `Size-factor estimation: ${currentEngine === "javascript" ? "not used" : parameters.sfType}`,
+      `webR channel: ${runtimeSummary.channelType || "unknown"}`,
+      `Cross-origin isolated: ${runtimeSummary.crossOriginIsolated ? "yes" : "no"}`,
+      `SharedArrayBuffer available: ${runtimeSummary.sharedArrayBufferAvailable ? "yes" : "no"}`,
+      "",
+      currentEngine === "javascript"
+        ? "Suggested actions: check group assignment, keep the minimum count threshold reasonable, and reduce the number of contrasts."
+        : "Suggested actions: use poscounts for sparse matrices, set Cook's cutoff to FALSE, keep low-expression filtering enabled, reduce optional heavy plots, or reduce the number of contrasts."
+    ].filter((line) => line !== "").join("\n");
+  } finally {
+    countVectorsForTpm?.clear();
+    finishAnalysisActivity();
+    setAnalysisControlsLocked(false);
+    updateWarningsAndRunButton();
+  }
 }
 
 async function runAnalysis() {
@@ -1077,7 +1337,7 @@ async function runAnalysis() {
       ? "Suggested actions: check sample grouping, keep the minimum count threshold at a reasonable value, and confirm that selected samples contain valid count data."
       : error.webRBridge
         ? "Suggested action: reload the browser tab once before retrying. The selected DESeq2 settings were not the cause of this JavaScript/webR bridge failure."
-        : "Suggested actions: use poscounts for sparse GExA matrices, set Cooks cutoff to FALSE, keep low-expression filtering enabled, check sample grouping, and disable optional heavy plots.";
+        : "Suggested actions: use poscounts for sparse GExA matrices, set Cook's cutoff to FALSE, keep low-expression filtering enabled, check sample grouping, and disable optional heavy plots.";
     el.errorText.textContent = [
       "Analysis failed.",
       "",
@@ -1131,6 +1391,7 @@ function updatePThresholdLabel() {
 function setAnalysisEngineMode(engine) {
   const isJavascriptEngine = engine === "javascript";
   const pModeField = $("pModeField");
+  state.multiGroupController?.setEngine(engine);
 
   if (pModeField) {
     pModeField.hidden = !isJavascriptEngine;
@@ -1165,10 +1426,26 @@ function setAnalysisEngineMode(engine) {
   updateWarningsAndRunButton();
 }
 
+function handleRunButtonClick() {
+  if (selectedAnalysisDesign() === "multi_group") {
+    runMultiGroupAnalysis();
+  } else {
+    runAnalysis();
+  }
+}
+
 async function initializeApp() {
   for (const id of [
     "datasetSelect",
     "datasetInfo",
+    "datasetLoadProgress",
+    "datasetLoadProgressLabel",
+    "datasetLoadProgressPercent",
+    "datasetLoadProgressTrack",
+    "datasetLoadProgressBar",
+    "datasetLoadProgressStage",
+    "datasetLoadProgressBytes",
+    "datasetLoadProgressLive",
     "gexaPanel",
     "uploadPanel",
     "countFile",
@@ -1176,8 +1453,13 @@ async function initializeApp() {
     "downloadExampleMatrix",
     "exampleMatrixPreview",
     "uploadStatus",
+    "twoGroupControlSection",
+    "twoGroupTreatmentSection",
     "controlSelector",
     "treatmentSelector",
+    "multiGroupSection",
+    "multiGroupBuilder",
+    "multiGroupSampleSelector",
     "warningPanel",
     "warningList",
     "memoryEstimate",
@@ -1212,10 +1494,21 @@ async function initializeApp() {
     el[id] = $(id);
   }
 
+  state.datasetLoadProgress = createDatasetLoadProgressController({
+    root: el.datasetLoadProgress,
+    label: el.datasetLoadProgressLabel,
+    percent: el.datasetLoadProgressPercent,
+    track: el.datasetLoadProgressTrack,
+    bar: el.datasetLoadProgressBar,
+    stage: el.datasetLoadProgressStage,
+    bytes: el.datasetLoadProgressBytes,
+    live: el.datasetLoadProgressLive
+  });
+
   state.resultTable = new ResultTable(el.resultTable);
   state.controlSelector = new SampleSelector({
     root: el.controlSelector,
-    title: "STEP 2. Select control samples",
+    title: "STEP 3. Select control samples",
     role: "control",
     getBlockedIds: () => state.treatmentSelector?.getSelectedIds() || new Set(),
     onChange: () => {
@@ -1226,11 +1519,19 @@ async function initializeApp() {
   });
   state.treatmentSelector = new SampleSelector({
     root: el.treatmentSelector,
-    title: "STEP 3. Select treatment samples",
+    title: "STEP 4. Select treatment samples",
     role: "treatment",
     getBlockedIds: () => state.controlSelector?.getSelectedIds() || new Set(),
     onChange: () => {
       state.controlSelector.refreshBlockedState();
+      estimateMemory();
+      updateWarningsAndRunButton();
+    }
+  });
+  state.multiGroupController = new MultiGroupController({
+    root: el.multiGroupBuilder,
+    selectorRoot: el.multiGroupSampleSelector,
+    onChange: () => {
       estimateMemory();
       updateWarningsAndRunButton();
     }
@@ -1291,12 +1592,11 @@ async function initializeApp() {
   document.querySelectorAll('input[name="data-mode"]').forEach((input) => {
     input.addEventListener("change", handleModeChange);
   });
+  document.querySelectorAll('input[name="analysis-design"]').forEach((input) => {
+    input.addEventListener("change", handleAnalysisDesignChange);
+  });
   el.datasetSelect.addEventListener("change", () => {
-    loadSelectedDataset().catch((error) => {
-      setProgress("Dataset load failed");
-      el.errorPanel.hidden = false;
-      el.errorText.textContent = formatError(error);
-    });
+    loadSelectedDataset();
   });
   el.countFile.addEventListener("change", handleUploadFile);
   el.showExampleMatrix.addEventListener("click", toggleExampleMatrixPreview);
@@ -1322,7 +1622,7 @@ async function initializeApp() {
     input.addEventListener("change", updateWarningsAndRunButton);
   }
 
-  el.runButton.addEventListener("click", runAnalysis);
+  el.runButton.addEventListener("click", handleRunButtonClick);
   el.cancelButton.addEventListener("click", () => {
     state.cancelled = true;
     el.cancelButton.disabled = true;
@@ -1346,6 +1646,7 @@ async function initializeApp() {
   }
 
   handleModeChange();
+  handleAnalysisDesignChange();
   setAnalysisEngineMode(selectedAnalysisEngine());
   setProgress("Ready");
 }

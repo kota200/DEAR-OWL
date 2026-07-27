@@ -10,14 +10,14 @@
     http-equiv="Content-Security-Policy"
     content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
   >
-  <title>DEG on Web</title>
-  <link rel="stylesheet" href="./css/deseq-app.css?v=20260721-help">
+  <title>DEAR-OWL</title>
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260727">
 </head>
 <body>
   <header class="site-header">
     <div>
-      <h1>DEG on Web</h1>
-      <p>For plant DEG analysis.</p>
+      <h1>DEAR-OWL</h1>
+      <p>Differential Expression Analysis Resource on the Web (Lite)</p>
     </div>
     <nav aria-label="Primary">
       <a href="./index.html" aria-current="page">Home</a>
@@ -37,7 +37,7 @@
       </div>
       <div>
         <span class="status-label">Runtime</span>
-        <strong id="runtimeStatus">App 20260717 | webR not started</strong>
+        <strong id="runtimeStatus">App 20260727 | webR not started</strong>
       </div>
     </section>
 
@@ -61,6 +61,27 @@
         <label for="datasetSelect">Dataset</label>
         <select id="datasetSelect"></select>
         <div id="datasetInfo" class="dataset-info">Loading dataset catalog...</div>
+        <div id="datasetLoadProgress" class="dataset-load-progress" hidden>
+          <div class="dataset-load-progress-header">
+            <span id="datasetLoadProgressLabel">Preparing dataset...</span>
+            <span id="datasetLoadProgressPercent"></span>
+          </div>
+          <div
+            id="datasetLoadProgressTrack"
+            class="dataset-load-progress-track"
+            role="progressbar"
+            aria-label="Dataset loading progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <div id="datasetLoadProgressBar" class="dataset-load-progress-bar"></div>
+          </div>
+          <div class="dataset-load-progress-details">
+            <span id="datasetLoadProgressStage"></span>
+            <span id="datasetLoadProgressBytes"></span>
+          </div>
+          <div id="datasetLoadProgressLive" class="sr-only" aria-live="polite"></div>
+        </div>
       </div>
 
       <div id="uploadPanel" class="data-panel" hidden>
@@ -77,10 +98,27 @@
     </section>
 
     <section class="step-card">
+      <div class="step-head">
+        <h2><span class="step-number">STEP 2.</span> Select analysis design</h2>
+      </div>
+
+      <div class="mode-grid analysis-design-grid">
+        <label class="mode-option">
+          <input type="radio" name="analysis-design" value="two_group" checked>
+          <span>Two-group comparison</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="analysis-design" value="multi_group">
+          <span>Multi-group comparison</span>
+        </label>
+      </div>
+    </section>
+
+    <section id="twoGroupControlSection" class="step-card">
       <div id="controlSelector">
         <div class="selector-heading selector-heading-control">
           <div>
-            <h3>STEP 2. Select control samples</h3>
+            <h3>STEP 3. Select control samples</h3>
             <p>At least 2 samples are required. Three or more biological replicates are recommended.</p>
           </div>
           <div class="selector-count" data-role="count">0 selected</div>
@@ -88,21 +126,29 @@
       </div>
     </section>
 
-    <section class="step-card">
+    <section id="twoGroupTreatmentSection" class="step-card">
       <div id="treatmentSelector">
         <div class="selector-heading selector-heading-treatment">
           <div>
-            <h3>STEP 3. Select treatment samples</h3>
+            <h3>STEP 4. Select treatment samples</h3>
             <p>At least 2 samples are required. Three or more biological replicates are recommended.</p>
           </div>
           <div class="selector-count" data-role="count">0 selected</div>
         </div>
       </div>
+    </section>
+
+    <section id="multiGroupSection" class="step-card" hidden>
+      <div class="step-head">
+        <h2><span class="step-number">STEP 3.</span> Build multi-group comparison</h2>
+      </div>
+      <div id="multiGroupBuilder"></div>
+      <div id="multiGroupSampleSelector" class="multi-group-sample-selector"></div>
     </section>
 
     <section class="step-card">
       <div class="step-head">
-        <h2><span class="step-number">STEP 4.</span> Set analysis parameters</h2>
+        <h2><span class="step-number">STEP 5.</span> Set analysis parameters</h2>
       </div>
 
       <div class="engine-panel">
@@ -110,7 +156,7 @@
           <span>Analysis Engine</span>
           <select id="analysisEngine">
             <option value="deseq2" selected>R / DESeq2 (standard)</option>
-            <option value="javascript">High-speed edgeR-like Z-test (ultrafast)</option>
+            <option value="javascript">High-speed pairwise Z-test (ultrafast)</option>
           </select>
         </label>
       </div>
@@ -159,18 +205,21 @@
         <label class="deseq2-only-param">
           <span>Size-factor estimation</span>
           <select id="sfType">
-            <option value="ratio">ratio</option>
+            <option value="ratio" selected>ratio</option>
             <option value="poscounts">poscounts</option>
             <option value="iterate">iterate</option>
           </select>
         </label>
-        <label class="deseq2-only-param">
-          <span>Cooks cutoff</span>
-          <select id="cooksCutoff">
-            <option value="false">FALSE</option>
-            <option value="true">TRUE</option>
-          </select>
-        </label>
+        <div class="parameter-with-help deseq2-only-param">
+          <label>
+            <span>Cook's cutoff</span>
+            <select id="cooksCutoff">
+              <option value="false">FALSE</option>
+              <option value="true" selected>TRUE</option>
+            </select>
+          </label>
+          <p class="parameter-help">May increase runtime. On slower or memory-limited systems, consider setting this to FALSE.</p>
+        </div>
         <label class="deseq2-only-param">
           <span>Test</span>
           <select id="testType">
@@ -183,7 +232,7 @@
 
     <section class="step-card">
       <div class="step-head">
-        <h2><span class="step-number">STEP 5.</span> Select plots</h2>
+        <h2><span class="step-number">STEP 6.</span> Select plots</h2>
       </div>
 
       <div class="plot-grid">
@@ -212,7 +261,7 @@
 
     <section class="step-card">
       <div class="step-head">
-        <h2><span class="step-number">STEP 6.</span> Run analysis</h2>
+        <h2><span class="step-number">STEP 7.</span> Run analysis</h2>
       </div>
 
       <div id="warningPanel" class="warning-panel" hidden>
@@ -239,7 +288,7 @@
 
     <section id="resultsSection" class="step-card results-section" hidden>
       <div class="step-head">
-        <h2><span class="step-number">STEP 7.</span> Results</h2>
+        <h2><span class="step-number">STEP 8.</span> Results</h2>
       </div>
 
       <div id="summaryCards" class="summary-grid"></div>
@@ -259,6 +308,6 @@
 
   </main>
 
-  <script type="module" src="./js/app.js?v=20260717-gene-length"></script>
+  <script type="module" src="./js/app.js?v=20260727"></script>
 </body>
 </html>
