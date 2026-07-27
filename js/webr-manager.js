@@ -1,4 +1,4 @@
-import { WEBR_CONFIG } from "./config.js?v=wald-lrt";
+import { WEBR_CONFIG } from "./config.js?v=20260727-defaults";
 import {
   fetchArrayBufferWithProgress,
   formatError,
@@ -79,8 +79,14 @@ function parsePackageList(text) {
   );
 }
 
+const APP_BASE_URL = new URL("../", import.meta.url);
+
+function appUrl(path) {
+  return new URL(path, APP_BASE_URL).href;
+}
+
 function versionedUrl(path, version) {
-  const url = new URL(path, window.location.href);
+  const url = new URL(path, APP_BASE_URL);
   url.searchParams.set("v", version);
   return url.href;
 }
@@ -239,7 +245,7 @@ class WebRManager {
   async performInitialization(requestedChannelType) {
     this.emit("Loading webR");
 
-    const baseUrl = new URL(WEBR_CONFIG.baseUrl, window.location.href).href;
+    const baseUrl = appUrl(WEBR_CONFIG.baseUrl);
     const moduleUrl = new URL(WEBR_CONFIG.modulePath, baseUrl).href;
     const { WebR, ChannelType } = await import(moduleUrl);
     const channelSupport = getWebRChannelSupport();
@@ -286,7 +292,7 @@ class WebRManager {
     if (this.channelType === "SharedArrayBuffer") {
       const librarySourceUrl = new URL(
         WEBR_CONFIG.workerLibraryDataUrl,
-        window.location.href
+        APP_BASE_URL
       ).href;
       this.emit("Mounting uncompressed DESeq2 library inside the webR worker");
       await webR.evalRVoid(`

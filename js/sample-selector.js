@@ -334,6 +334,15 @@ export class SampleSelector {
     this.renderTable();
   }
 
+  setSelectedIds(ids, { emit = false } = {}) {
+    this.selected = new Set(ids);
+    this.page = 0;
+    this.renderTable();
+    if (emit) {
+      this.onChange?.(this.getSelected());
+    }
+  }
+
   getSelected() {
     return this.rows.filter((row) => this.selected.has(sampleId(row)));
   }

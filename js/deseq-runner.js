@@ -1,5 +1,5 @@
 import { APP_CONFIG } from "./config.js?v=20260717-gene-length";
-import { webrManager } from "./webr-manager.js?v=wald-lrt";
+import { webrManager } from "./webr-manager.js?v=20260727-defaults";
 import {
   cleanupStagedDeseq2,
   runStagedDeseq2
