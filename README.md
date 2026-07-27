@@ -64,12 +64,11 @@ gene0001,10,40
 gene0002,20,25
 ```
 
-## Add Or Update A Dataset
+## Add or update a dataset
 
-Add the source CSV/TSV files to `~/www/RNADB/Download/files`, then add one
-entry to `deseq2/config/datasets.json`. The count file is required; TPM and
-annotation files are optional fallback/enrichment files. `geneLengthFile` is
-recommended so TPM can be calculated without reading the large TPM matrix.
+Upload the dataset files to the external data directory configured by `externalDataBaseUrl`, and then add a dataset entry to `config/datasets.json`.
+
+The following example registers the Pearl millet Tift dataset:
 
 ```json
 {
@@ -78,10 +77,9 @@ recommended so TPM can be calculated without reading the large TPM matrix.
   "species": "Pearl millet",
   "reference": "Tift",
   "dataVersion": "raw",
-  "description": "GExA raw count, TPM, and annotation data.",
+  "description": "GExA raw count data with gene lengths and annotation.",
   "format": "direct_matrix",
   "countFile": "Pearl_millet_count_data_cv_Tift.csv.gz",
-  "tpmFile": "Pearl_millet_TPM_data_cv_Tift.csv.gz",
   "geneLengthFile": "Pearl_millet_gene_length_cv_Tift.tsv",
   "annotationFile": "Pearl_millet_annotation_cv_Tift.tsv",
   "matrixOrientation": "samples_as_rows",
@@ -101,12 +99,48 @@ recommended so TPM can be calculated without reading the large TPM matrix.
 }
 ```
 
-Use `referenceDisplay` to control the Reference genome text shown in Step 1;
-new species can define it without changing the app JavaScript.
+### Dataset entry fields
 
-Use `null` for URL templates unless the real gene-page URL pattern has been
-confirmed. Gene IDs are passed through `encodeURIComponent()` before links are
-created.
+| Key | Requirement | Description |
+|---|---|---|
+| `id` | Required | Unique identifier used internally by DEAR-OWL. |
+| `label` | Required | Dataset name displayed in the dataset selector. |
+| `species` | Recommended | Species name displayed in the dataset information and output files. |
+| `reference` | Recommended | Short reference-genome or cultivar identifier. |
+| `dataVersion` | Optional | Dataset version or data type, such as `raw`. |
+| `description` | Optional | Short description of the dataset. |
+| `format` | Required | Input format. Use `direct_matrix` for the matrices described here. |
+| `countFile` | Required | Raw integer count matrix used for differential expression analysis. |
+| `geneLengthFile` | Recommended | Gene-length table used to calculate TPM directly from raw counts. |
+| `tpmFile` | Optional | Precomputed TPM matrix used only as a fallback if TPM calculation from gene lengths fails. |
+| `annotationFile` | Optional | Gene annotation table used to add homolog information to the results. |
+| `matrixOrientation` | Optional | Matrix layout. The default is `samples_as_rows`. |
+| `metadataColumnCount` | Optional | Number of metadata columns before the gene columns. The default is `10`. |
+| `sampleIdColumn` | Recommended | Metadata column containing unique sample IDs, usually `SRA`. |
+| `geneCount` | Optional | Expected number of genes, used for dataset information. |
+| `sampleCount` | Optional | Expected number of samples, used for dataset information and loading progress. |
+| `annotationHasHeader` | Conditional | Set to `false` when the annotation file has no header row. The default is `true`. |
+| `annotationColumns` | Conditional | Column names and order for a headerless annotation file. |
+| `referenceDisplay` | Optional | Full reference-genome text displayed in the app. If omitted, `reference` is used. |
+| `gexaGeneUrlTemplate` | Optional | URL template for linking gene IDs to a GExA gene page. Use `{gene}` as the placeholder. |
+| `tgifGeneUrlTemplate` | Optional | URL template for linking gene IDs to another gene-information resource. Use `{gene}` as the placeholder. |
+
+### Required and optional files
+
+Only `countFile` is required for differential expression analysis.
+
+- `countFile` is required and must contain raw, non-negative integer counts.
+- `geneLengthFile` is optional but recommended. When it is available, DEAR-OWL calculates TPM directly from the raw counts and gene lengths.
+- `tpmFile` is optional and is normally unnecessary. It is used only as a fallback when TPM cannot be calculated from gene lengths.
+- `annotationFile` is optional and adds homolog information to the result table.
+
+The count matrix must contain one sample per row. The first `metadataColumnCount` columns are sample metadata, including the column specified by `sampleIdColumn`. All remaining columns are gene IDs.
+
+The gene-length table must have a header and include `Geneid` and `Length` columns. Gene lengths must be positive numbers and must be available for every gene in the count matrix.
+
+If `annotationHasHeader` is `false`, the annotation file must follow the column order specified by `annotationColumns`.
+
+File names are case-sensitive and must exactly match the files deployed on the server.
 
 ## Deployment
 
