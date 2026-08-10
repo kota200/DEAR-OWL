@@ -74,6 +74,11 @@ A reasonable first DESeq2 run uses:
 - **Size-factor estimation:** `ratio`, or `poscounts` for a sparse matrix when
   ratio estimation fails
 
+Low-expression pre-filtering is shared by DESeq2 and the pairwise Z-test. When
+enabled, a gene is tested only if the sum of its raw counts across all selected
+samples reaches the configured minimum total count. Turning it off disables
+that threshold and tests all input genes.
+
 DESeq2 is the standard analysis engine. Pairwise Z-test is intended for fast
 screening and should not be presented as equivalent statistical inference.
 

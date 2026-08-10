@@ -1031,6 +1031,15 @@ tbody tr:hover {
   gap: 10px;
 }
 
+.prefilter-parameter .minimum-count-control {
+  transition: opacity 0.15s ease;
+}
+
+.prefilter-parameter.is-disabled .minimum-count-control,
+.prefilter-parameter.is-disabled .parameter-help {
+  opacity: 0.55;
+}
+
 .parameter-help {
   margin: 0;
   color: var(--muted);

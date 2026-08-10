@@ -803,7 +803,7 @@ assert.equal(RESULT_COLUMN_LABELS.control_tpm_median, "Control TPM median");
 assert.equal(RESULT_COLUMN_LABELS.treatment_tpm_median, "Treatment TPM median");
 assert.equal(RESULT_COLUMN_LABELS.arabidopsis_homolog, "Arabidopsis homolog");
 assert.equal(RESULT_COLUMN_LABELS.rice_homolog, "Rice homolog");
-assert.equal(APP_CONFIG.appVersion, "20260810-shared-webr-manager");
+assert.equal(APP_CONFIG.appVersion, "20260810-shared-prefilter");
 assert.match(indexHtml, /id="offlineStatus"/);
 assert.match(indexHtml, /id="localLaunchNotice"/);
 assert.match(indexHtml, /start-local\.cmd/);
@@ -812,7 +812,7 @@ assert.match(indexHtml, /id="datasetPreparationProgress"/);
 assert.match(indexHtml, /Analysis preparation/);
 assert.doesNotMatch(indexHtml, /<span class="status-label">Local analysis<\/span>/);
 assert.match(indexHtml, /app-bootstrap-20260810-shared-webr-manager\.js/);
-assert.match(appBootstrapSource, /20260810-shared-webr-manager-9/);
+assert.match(appBootstrapSource, /20260810-shared-prefilter-10/);
 assert.match(appBootstrapSource, /location\.reload\(\)/);
 assert.match(appSource, /runAfterDomReady\(document, startApp\)/);
 const initializeAppSource = appSource.slice(appSource.indexOf("async function initializeApp"));
@@ -880,7 +880,9 @@ assert.match(indexHtml, /id="multiGroupSection"[\s\S]*?STEP 3\.[\s\S]*?Build mul
 assert.match(indexHtml, /STEP 5\.[\s\S]*?Set analysis parameters/);
 assert.doesNotMatch(indexHtml, /Analysis Engine|id="analysisEngine"/);
 assert.doesNotMatch(indexHtml, /Correction mode|P-value correction mode|id="p-mode"/i);
-assert.match(indexHtml, /Low-expression pre-filtering \(DESeq2 only\)/);
+assert.match(indexHtml, /<div class="parameter-with-help prefilter-parameter">[\s\S]*?Low-expression pre-filtering[\s\S]*?Minimum total count across selected samples/);
+assert.doesNotMatch(indexHtml, /Low-expression pre-filtering \(DESeq2 only\)/);
+assert.match(appSource, /el\.minimumCount\.disabled = !enabled/);
 assert.match(indexHtml, /DESeq2 independent filtering \(DESeq2 only\)/);
 assert.match(indexHtml, /Fit type \(DESeq2 only\)/);
 assert.match(indexHtml, /Size-factor estimation \(DESeq2 only\)/);
@@ -1420,6 +1422,7 @@ assert.ok(
     ["C2", new Float64Array([11, 92, 25, 0])]
   ]);
   const parameters = {
+    preFiltering: true,
     minimumCount: 1,
     fdrThreshold: 0.99,
     log2FoldChangeThreshold: 0.1
@@ -1486,6 +1489,27 @@ assert.ok(
     directBvA.resultRows.find((row) => row.gene_id === "gene_low").direction,
     "Filtered / NA",
     "ultrafast analysis applies the minimum total count filter"
+  );
+  const unfilteredZTest = runPairwiseZTest({
+    geneNames,
+    vectorsMap,
+    numeratorSamples: groups[1].samples,
+    denominatorSamples: groups[0].samples,
+    parameters: {
+      ...parameters,
+      preFiltering: false,
+      minimumCount: 1000000
+    }
+  });
+  assert.equal(
+    unfilteredZTest.resultRows.find((row) => row.gene_id === "gene_low").prefilter_pass,
+    true,
+    "ultrafast analysis tests low-count genes when pre-filtering is disabled"
+  );
+  assert.equal(
+    unfilteredZTest.summary.genes_after_prefiltering,
+    geneNames.length,
+    "disabled ultrafast pre-filter retains every input gene"
   );
   const bhRows = directBvA.resultRows
     .filter((row) => Number.isFinite(row.pvalue))

@@ -1,5 +1,5 @@
-const SERVICE_WORKER_VERSION = "20260810-shared-webr-manager-9";
-const APP_VERSION = "20260810-shared-webr-manager";
+const SERVICE_WORKER_VERSION = "20260810-shared-prefilter-10";
+const APP_VERSION = "20260810-shared-prefilter";
 const RELOAD_KEY = `dear-owl-worker-reload-${SERVICE_WORKER_VERSION}`;
 
 function waitForWorkerActivation(worker) {

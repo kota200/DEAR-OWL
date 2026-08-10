@@ -1,4 +1,4 @@
-const CACHE_VERSION = "20260810-shared-webr-manager-9";
+const CACHE_VERSION = "20260810-shared-prefilter-10";
 const CACHE_PREFIX = "dear-owl-local-";
 const STATIC_CACHE = `${CACHE_PREFIX}static-${CACHE_VERSION}`;
 const DATA_CACHE = `${CACHE_PREFIX}data-${CACHE_VERSION}`;

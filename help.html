@@ -170,11 +170,11 @@
         </div>
         <div>
           <h3>Thresholds</h3>
-          <p>FDR threshold, absolute log2 fold-change threshold, and minimum total count apply to both methods. A gene is counted as Up or Down only when both the FDR and fold-change thresholds are met.</p>
+          <p>FDR threshold, absolute log2 fold-change threshold, and the optional low-expression pre-filter apply to both methods. A gene is counted as Up or Down only when both the FDR and fold-change thresholds are met.</p>
         </div>
         <div>
           <h3>Filtering</h3>
-          <p><strong>Minimum total count</strong> filters low-count genes in both methods. The separate <strong>Low-expression pre-filtering (DESeq2 only)</strong> control applies only to DESeq2.</p>
+          <p><strong>Low-expression pre-filtering</strong> is shared by DESeq2 and the pairwise Z-test. When enabled, genes whose raw counts sum to less than <strong>Minimum total count</strong> across all selected samples are excluded from testing. Turning it off disables the threshold and tests every input gene.</p>
         </div>
         <div>
           <h3>DESeq2 Options (DESeq2 only)</h3>
@@ -201,7 +201,7 @@
         </div>
         <div>
           <h3>Minimum Total Count</h3>
-          <p>Genes with total counts below this value across selected samples are removed before testing in both methods.</p>
+          <p>When low-expression pre-filtering is enabled, genes with total counts below this value across selected samples are removed before testing in both methods. The field is disabled when pre-filtering is turned off.</p>
         </div>
         <div>
           <h3>Independent Filtering (DESeq2 only)</h3>
