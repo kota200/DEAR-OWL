@@ -1,4 +1,4 @@
-const SERVICE_WORKER_VERSION = "20260810-shared-webr-manager-9";
+const SERVICE_WORKER_VERSION = "20260810-shared-prefilter-10";
 const MESSAGE_TIMEOUT_MS = 120000;
 
 let initializationPromise = null;

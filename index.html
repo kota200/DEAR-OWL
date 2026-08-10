@@ -11,7 +11,7 @@
     content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
   >
   <title>DEAR-OWL</title>
-  <link rel="stylesheet" href="./css/deseq-app.css?v=20260810-shared-webr-manager">
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260810-shared-prefilter">
 </head>
 <body>
   <header class="site-header">
@@ -52,7 +52,7 @@
       </div>
       <div>
         <span class="status-label">Runtime</span>
-        <strong id="runtimeStatus">App 20260810-shared-webr-manager | webR not started</strong>
+        <strong id="runtimeStatus">App 20260810-shared-prefilter | webR not started</strong>
       </div>
     </section>
 
@@ -202,14 +202,17 @@
           <span>Absolute log2 fold change threshold</span>
           <input id="log2fcThreshold" type="number" min="0" step="0.1" value="1">
         </label>
-        <label class="deseq2-only-param inline-check">
-          <input id="preFiltering" type="checkbox" checked>
-          <span>Low-expression pre-filtering (DESeq2 only)</span>
-        </label>
-        <label>
-          <span>Minimum total count across selected samples</span>
-          <input id="minimumCount" type="number" min="0" step="1" value="5">
-        </label>
+        <div class="parameter-with-help prefilter-parameter">
+          <label class="inline-check">
+            <input id="preFiltering" type="checkbox" checked>
+            <span>Low-expression pre-filtering</span>
+          </label>
+          <label class="minimum-count-control">
+            <span>Minimum total count across selected samples</span>
+            <input id="minimumCount" type="number" min="0" step="1" value="5">
+          </label>
+          <p class="parameter-help">Applied to both DESeq2 and the pairwise Z-test. Turn it off to test all input genes.</p>
+        </div>
         <input id="minimumSamples" type="hidden" value="1">
         <div class="parameter-with-help deseq2-only-param">
           <label class="inline-check">
@@ -270,15 +273,15 @@
         </label>
         <label class="inline-check plot-heavy">
           <input id="plot-pca" type="checkbox">
-          <span>PCA plot <small>Computationally intensive. Requires variance-stabilizing transformation.</small></span>
+          <span>PCA plot <small>Computationally intensive. Requires variance-stabilizing transformation.DESeq2 only.</small></span>
         </label>
         <label class="inline-check plot-heavy">
           <input id="plot-sampleCorrelation" type="checkbox">
-          <span>Sample correlation heatmap <small>Computationally intensive for many samples.</small></span>
+          <span>Sample correlation heatmap <small>Computationally intensive for many samples.DESeq2 only.</small></span>
         </label>
         <label class="inline-check plot-heavy">
           <input id="plot-sampleDistance" type="checkbox">
-          <span>Sample distance heatmap <small>Computationally intensive for many samples.</small></span>
+          <span>Sample distance heatmap <small>Computationally intensive for many samples.DESeq2 only.</small></span>
         </label>
       </div>
     </section>
@@ -341,7 +344,7 @@
 
   </main>
 
-  <script src="./js/local-launch-guard.js?v=20260810-shared-webr-manager"></script>
+  <script src="./js/local-launch-guard.js?v=20260810-shared-prefilter"></script>
   <script type="module" src="./js/app-bootstrap-20260810-shared-webr-manager.js"></script>
 </body>
 </html>

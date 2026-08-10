@@ -2,7 +2,7 @@ import {
   APP_CONFIG,
   DEFAULT_PARAMETERS,
   DEFAULT_PLOTS
-} from "./config.js?v=20260810-shared-webr-manager";
+} from "./config.js?v=20260810-shared-prefilter";
 import {
   buildColDataCsv,
   buildCountCsvFromVectors,
@@ -20,12 +20,12 @@ import {
   buildBinaryCountMatrixFromVectors,
   runDeseqAnalysis
 } from "./deseq-runner.js?v=20260727-defaults";
-import { runPairwiseZTest } from "./fast-ztest.js?v=20260810-bh";
+import { runPairwiseZTest } from "./fast-ztest.js?v=20260810-shared-prefilter";
 import {
   buildGroupedColDataCsv,
   MultiGroupController
 } from "./multi-group-controller.js?v=20260810-button-engine";
-import { runMultiGroupFastAnalysis } from "./multi-group-fast-runner.js?v=20260810-bh";
+import { runMultiGroupFastAnalysis } from "./multi-group-fast-runner.js?v=20260810-shared-prefilter";
 import { runMultiGroupDeseqAnalysis } from "./multi-group-runner.js?v=20260806-webr-log";
 import {
   addGroupedTpmAndAnnotations,
@@ -524,10 +524,20 @@ function selectedAnalysisDesign() {
   return state.analysisDesign || "two_group";
 }
 
+function updatePreFilterControls() {
+  const enabled = Boolean(el.preFiltering?.checked);
+  if (el.minimumCount) {
+    el.minimumCount.disabled = !enabled;
+  }
+  const container = el.preFiltering?.closest(".prefilter-parameter");
+  container?.classList.toggle("is-disabled", !enabled);
+}
+
 function readParameters(engine = ANALYSIS_ENGINES.DESEQ2) {
   const commonParameters = {
     fdrThreshold: Number(el.fdrThreshold.value),
     log2FoldChangeThreshold: Number(el.log2fcThreshold.value),
+    preFiltering: el.preFiltering.checked,
     minimumCount: Number(el.minimumCount.value)
   };
 
@@ -537,7 +547,6 @@ function readParameters(engine = ANALYSIS_ENGINES.DESEQ2) {
 
   return {
     ...commonParameters,
-    preFiltering: el.preFiltering.checked,
     preFilterMode: "total_count",
     minimumSamples: Number(el.minimumSamples.value),
     independentFiltering: el.independentFiltering.checked,
@@ -563,14 +572,18 @@ function readPlots(engine = ANALYSIS_ENGINES.DESEQ2) {
 }
 
 function validParameters(parameters, engine = ANALYSIS_ENGINES.DESEQ2) {
+  const minimumCountValid = parameters.preFiltering === false || (
+    Number.isFinite(parameters.minimumCount) &&
+    parameters.minimumCount >= 0 &&
+    Number.isInteger(parameters.minimumCount)
+  );
   const commonParametersValid = Number.isFinite(parameters.fdrThreshold) &&
     parameters.fdrThreshold > 0 &&
     parameters.fdrThreshold < 1 &&
     Number.isFinite(parameters.log2FoldChangeThreshold) &&
     parameters.log2FoldChangeThreshold >= 0 &&
-    Number.isFinite(parameters.minimumCount) &&
-    parameters.minimumCount >= 0 &&
-    Number.isInteger(parameters.minimumCount);
+    typeof parameters.preFiltering === "boolean" &&
+    minimumCountValid;
 
   if (!commonParametersValid || engine === ANALYSIS_ENGINES.ZTEST) {
     return commonParametersValid;
@@ -1252,7 +1265,7 @@ async function runJavascriptAnalysis({ selected, parameters, allSamples, inputGe
     return {
       resultRows: jsOut.resultRows,
       summary: jsOut.summary,
-      analysisLog: `[JS FAST ENGINE REPORT]\nCalculations ran successfully in millisecond metrics.\nPre-filtering count: ${parameters.minimumCount} threshold applied.\nBenjamini-Hochberg FDR adjustment applied.`,
+      analysisLog: `[JS FAST ENGINE REPORT]\nCalculations ran successfully in millisecond metrics.\n${parameters.preFiltering ? `Pre-filtering: minimum total count ${parameters.minimumCount} applied.` : "Pre-filtering: disabled; all input genes tested."}\nBenjamini-Hochberg FDR adjustment applied.`,
       normalizedCsv: "",
       normalizedBoxplot: null,
       plotData: {},
@@ -1890,6 +1903,7 @@ async function initializeApp() {
       input.value = String(value);
     }
   });
+  updatePreFilterControls();
 
   document.querySelectorAll('input[name="data-mode"]').forEach((input) => {
     input.addEventListener("change", handleModeChange);
@@ -1903,6 +1917,7 @@ async function initializeApp() {
   el.countFile.addEventListener("change", handleUploadFile);
   el.showExampleMatrix.addEventListener("click", toggleExampleMatrixPreview);
   el.downloadExampleMatrix.addEventListener("click", downloadExampleCountMatrix);
+  el.preFiltering.addEventListener("change", updatePreFilterControls);
 
   for (const input of [
     el.fdrThreshold,

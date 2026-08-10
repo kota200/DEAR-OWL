@@ -1,4 +1,4 @@
-import { runPairwiseZTest } from "./fast-ztest.js?v=20260810-bh";
+import { runPairwiseZTest } from "./fast-ztest.js?v=20260810-shared-prefilter";
 import { buildDirectionMatrix } from "./intersections.js";
 
 export function runMultiGroupFastAnalysis({
@@ -67,6 +67,9 @@ export function runMultiGroupFastAnalysis({
       "[JS FAST ENGINE REPORT]",
       "Ultrafast pairwise Z-test completed.",
       `Contrasts: ${contrastResults.length}`,
+      parameters.preFiltering
+        ? `Pre-filtering: minimum total count ${parameters.minimumCount} applied.`
+        : "Pre-filtering: disabled; all input genes tested.",
       "Benjamini-Hochberg FDR adjustment is applied separately within each pairwise comparison.",
       "No global/omnibus test is performed by the ultrafast engine."
     ].join("\n")

@@ -86,7 +86,7 @@ export function runPairwiseZTest({
       geneTotalCount += vectorsMap.get(id)?.[geneIndex] || 0;
     }
 
-    if (geneTotalCount < parameters.minimumCount) {
+    if (parameters.preFiltering !== false && geneTotalCount < parameters.minimumCount) {
       results.push({
         gene_id: gene,
         baseMean: geneTotalCount / numSamples,
