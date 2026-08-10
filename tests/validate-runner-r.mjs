@@ -63,6 +63,8 @@ assert.match(multiGroupRunnerSource, /runStagedMultiGroupDeseq2/);
 assert.match(multiGroupRunnerSource, /PostMessage compatibility mode/);
 assert.match(multiGroupStagedRunnerSource, /WRAPPER_STARTED/);
 assert.match(multiGroupStagedRunnerSource, /readBin/);
+assert.doesNotMatch(multiGroupStagedRunnerSource, /format\s*\(\s*Sys\.time\s*\(/);
+assert.doesNotMatch(multiGroupRunnerSource, /format\s*\(\s*Sys\.time\s*\(/);
 assert.match(multiGroupStagedRunnerSource, /DESeq2::nbinomLRT/);
 assert.match(multiGroupStagedRunnerSource, /DESeq2::nbinomWaldTest/);
 assert.match(runnerSource, /CONSOLE_OK/);

@@ -50,3 +50,27 @@ export function computeExclusiveIntersections(sets) {
     .filter((entry) => entry.genes.length > 0)
     .sort((a, b) => b.genes.length - a.genes.length || a.key.localeCompare(b.key));
 }
+
+export function describeIntersectionMembership(sets, membership) {
+  if (!Array.isArray(sets) || !Array.isArray(membership) || sets.length !== membership.length) {
+    throw new Error("Intersection labels require one membership value per gene set.");
+  }
+
+  const included = [];
+  const excluded = [];
+  membership.forEach((isIncluded, index) => {
+    const label = sets[index]?.label || `Set ${index + 1}`;
+    (isIncluded ? included : excluded).push(label);
+  });
+
+  if (!included.length) {
+    return "Outside all selected sets";
+  }
+  if (included.length === 1) {
+    return `${included[0]} only`;
+  }
+  if (!excluded.length) {
+    return `Shared by all selected sets: ${included.join(" + ")}`;
+  }
+  return `${included.join(" + ")} only (not in ${excluded.join(" + ")})`;
+}

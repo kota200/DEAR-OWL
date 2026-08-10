@@ -33,25 +33,11 @@ export function calculateLibrarySizes(sampleIds, vectorsMap) {
   return librarySizes;
 }
 
-function adjustPValues(rows, mode) {
+function adjustPValuesBenjaminiHochberg(rows) {
   const validTests = rows.filter((row) => row.direction !== "Filtered / NA");
   const totalTests = validTests.length;
 
   if (totalTests === 0) {
-    return totalTests;
-  }
-
-  if (mode === "bonferroni") {
-    for (const row of validTests) {
-      row.padj = Math.min(1.0, row.pvalue * totalTests);
-    }
-    return totalTests;
-  }
-
-  if (mode === "raw") {
-    for (const row of validTests) {
-      row.padj = row.pvalue;
-    }
     return totalTests;
   }
 
@@ -75,7 +61,6 @@ export function runPairwiseZTest({
   numeratorSamples,
   denominatorSamples,
   parameters,
-  pAdjustmentMode = "fdr",
   inputGeneCount = geneNames.length
 }) {
   const allSamples = [...denominatorSamples, ...numeratorSamples];
@@ -165,7 +150,7 @@ export function runPairwiseZTest({
     });
   }
 
-  const totalTests = adjustPValues(results, pAdjustmentMode);
+  const totalTests = adjustPValuesBenjaminiHochberg(results);
 
   for (const row of results) {
     const direction = classifyDirection(

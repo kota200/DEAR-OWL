@@ -88,10 +88,7 @@ function stageCode(stateName, label, body) {
       st <- get(${rString(stateName)}, envir = .GlobalEnv, inherits = FALSE)
       mark_stage("STATE_READY")
       add_log <- function(message) {
-        st$logs <- c(
-          st$logs,
-          paste(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), as.character(message))
-        )
+        st$logs <- c(st$logs, as.character(message))
       }
       mark_stage("LOGGING_STAGE")
       add_log(${rString(label)})
@@ -129,10 +126,7 @@ function initializeCode(stateName, logPath) {
   return `
     local({
       st <- new.env(parent = baseenv())
-      st$logs <- paste(
-        format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-        "0. Multi-group staged R job initialized"
-      )
+      st$logs <- "0. Multi-group staged R job initialized"
       st$started_at <- Sys.time()
       st$log_path <- ${rString(logPath)}
       writeLines(st$logs, con = st$log_path, useBytes = TRUE)

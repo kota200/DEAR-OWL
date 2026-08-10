@@ -2027,12 +2027,22 @@ export async function fetchSampleVector(bundle, sample, kind, onProgress = null)
 }
 
 export async function loadAnnotations(bundle) {
+  if (bundle.annotationCache) {
+    return bundle.annotationCache;
+  }
+
   if (!bundle.dataset.annotationUrl) {
-    return { columns: [], byGene: new Map(), warnings: ["No annotation URL is configured."] };
+    bundle.annotationCache = {
+      columns: [],
+      byGene: new Map(),
+      warnings: ["No annotation URL is configured."]
+    };
+    return bundle.annotationCache;
   }
 
   if (bundle.directMatrix) {
-    return await loadDirectAnnotations(bundle);
+    bundle.annotationCache = await loadDirectAnnotations(bundle);
+    return bundle.annotationCache;
   }
 
   const payload = await fetchGzipJson(bundle.dataset.annotationUrl);
@@ -2060,7 +2070,47 @@ export async function loadAnnotations(bundle) {
     warnings.push(`${duplicateCount.toLocaleString()} duplicate annotation gene IDs were ignored after the first match.`);
   }
 
-  return { columns, byGene, warnings };
+  bundle.annotationCache = { columns, byGene, warnings };
+  return bundle.annotationCache;
+}
+
+export async function prepareDatasetForOfflineAnalysis(bundle, onProgress = null) {
+  const warnings = [];
+  const fallbackUrls = [];
+  let geneLengthsReady = false;
+  let annotationsReady = false;
+
+  if (bundle.dataset.geneLengthUrl) {
+    try {
+      onProgress?.("Storing gene lengths for local analysis");
+      await loadGeneLengths(bundle, onProgress);
+      geneLengthsReady = true;
+    } catch (error) {
+      warnings.push(`Gene-length preparation failed: ${error.message}`);
+      if (bundle.dataset.tpmUrl) {
+        fallbackUrls.push(bundle.dataset.tpmUrl);
+      }
+    }
+  } else if (bundle.dataset.tpmUrl) {
+    fallbackUrls.push(bundle.dataset.tpmUrl);
+  }
+
+  if (bundle.dataset.annotationUrl) {
+    try {
+      onProgress?.("Storing annotations for local analysis");
+      await loadAnnotations(bundle);
+      annotationsReady = true;
+    } catch (error) {
+      warnings.push(`Annotation preparation failed: ${error.message}`);
+    }
+  }
+
+  return {
+    geneLengthsReady,
+    annotationsReady,
+    fallbackUrls,
+    warnings
+  };
 }
 
 async function loadDirectAnnotations(bundle) {
@@ -2172,10 +2222,22 @@ export function buildColDataCsv(controlSamples, treatmentSamples) {
 
 export async function loadSelectedCountVectors(bundle, samples, onProgress) {
   const vectorsBySample = new Map();
+  const vectorCache = bundle.selectedCountVectorCache || new Map();
+  bundle.selectedCountVectorCache = vectorCache;
+  const selectedIds = selectedSampleIds(samples);
+
+  for (const sampleId of vectorCache.keys()) {
+    if (!selectedIds.has(sampleId)) {
+      vectorCache.delete(sampleId);
+    }
+  }
 
   try {
     if (bundle.directMatrix) {
-      await ensureDirectCountRows(bundle, samples, onProgress);
+      const missingSamples = samples.filter((sample) => !vectorCache.has(directSampleId(sample)));
+      if (missingSamples.length > 0) {
+        await ensureDirectCountRows(bundle, missingSamples, onProgress);
+      }
     }
 
     for (let index = 0; index < samples.length; index += 1) {
@@ -2184,9 +2246,13 @@ export async function loadSelectedCountVectors(bundle, samples, onProgress) {
       onProgress?.(bundle.directMatrix
         ? `Preparing selected count vectors (${index + 1}/${samples.length}): ${sampleId}`
         : `Loading selected count files (${index + 1}/${samples.length}): ${sampleId}`);
-      const vector = bundle.directMatrix
-        ? directCountVector(bundle, sampleId)
-        : await fetchSampleVector(bundle, sample, "count");
+      let vector = vectorCache.get(sampleId);
+      if (!vector) {
+        vector = bundle.directMatrix
+          ? directCountVector(bundle, sampleId)
+          : await fetchSampleVector(bundle, sample, "count");
+        vectorCache.set(sampleId, vector);
+      }
       vectorsBySample.set(sampleId, vector);
     }
   } finally {

@@ -64,6 +64,23 @@ export function getWebRChannelSupport(runtime = globalThis) {
   };
 }
 
+export function chooseWebRChannel({
+  forcePostMessage = false,
+  managerStatus = "not-started",
+  currentChannel = null,
+  supportedChannel = "PostMessage"
+} = {}) {
+  if (forcePostMessage) {
+    return "PostMessage";
+  }
+
+  if (["initializing", "ready"].includes(managerStatus) && currentChannel) {
+    return currentChannel;
+  }
+
+  return supportedChannel;
+}
+
 function nextPaint() {
   return new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -89,6 +106,37 @@ function versionedUrl(path, version) {
   const url = new URL(path, APP_BASE_URL);
   url.searchParams.set("v", version);
   return url.href;
+}
+
+export function getWebROfflineAssetUrls(channelType = getWebRChannelSupport().channelType) {
+  const baseUrl = appUrl(WEBR_CONFIG.baseUrl);
+  const workerLibraryMetadataUrl = WEBR_CONFIG.workerLibraryDataUrl.replace(
+    /\.data(?:\.gz)?(?:[?#].*)?$/,
+    ".js.metadata"
+  );
+
+  const commonUrls = [
+    new URL(WEBR_CONFIG.modulePath, baseUrl).href,
+    new URL("webr-worker.js", baseUrl).href,
+    new URL("R.js", baseUrl).href,
+    new URL("R.wasm", baseUrl).href,
+    new URL("libRblas.so", baseUrl).href,
+    new URL("libRlapack.so", baseUrl).href
+  ];
+
+  if (channelType === "SharedArrayBuffer") {
+    return [
+      ...commonUrls,
+      versionedUrl(WEBR_CONFIG.workerLibraryDataUrl, WEBR_CONFIG.libraryVersion),
+      versionedUrl(workerLibraryMetadataUrl, WEBR_CONFIG.libraryVersion)
+    ];
+  }
+
+  return [
+    ...commonUrls,
+    versionedUrl(WEBR_CONFIG.libraryDataUrl, WEBR_CONFIG.libraryVersion),
+    versionedUrl(WEBR_CONFIG.libraryMetadataUrl, WEBR_CONFIG.libraryVersion)
+  ];
 }
 
 function rString(value) {
@@ -138,7 +186,7 @@ async function loadRPackage(webR, packageName) {
   return result.substring("OK|".length);
 }
 
-class WebRManager {
+export class WebRManager {
   constructor() {
     const channelSupport = getWebRChannelSupport();
     this.webR = null;
@@ -191,9 +239,12 @@ class WebRManager {
 
   async initialize({ forcePostMessage = false } = {}) {
     const channelSupport = getWebRChannelSupport();
-    const requestedChannelType = forcePostMessage
-      ? "PostMessage"
-      : channelSupport.channelType;
+    const requestedChannelType = chooseWebRChannel({
+      forcePostMessage,
+      managerStatus: this.status,
+      currentChannel: this.channelType,
+      supportedChannel: channelSupport.channelType
+    });
 
     if (this.status === "ready" && this.webR && this.channelType === requestedChannelType) {
       return this.webR;
@@ -389,8 +440,12 @@ class WebRManager {
 
     this.emit("Loading R packages");
 
-    for (const packageName of PACKAGES_TO_LOAD) {
-      this.emit(`Loading R package: ${packageName}`);
+    for (let packageIndex = 0; packageIndex < PACKAGES_TO_LOAD.length; packageIndex += 1) {
+      const packageName = PACKAGES_TO_LOAD[packageIndex];
+      this.emit(`Loading R package: ${packageName}`, {
+        packageIndex: packageIndex + 1,
+        packageCount: PACKAGES_TO_LOAD.length
+      });
       await nextPaint();
       this.loadedVersions[packageName] = await loadRPackage(webR, packageName);
     }
@@ -434,4 +489,17 @@ class WebRManager {
   }
 }
 
-export const webrManager = new WebRManager();
+const WEBR_MANAGER_GLOBAL_KEY = Symbol.for("dear-owl.webr-manager.singleton");
+
+if (!globalThis[WEBR_MANAGER_GLOBAL_KEY]) {
+  Object.defineProperty(globalThis, WEBR_MANAGER_GLOBAL_KEY, {
+    value: new WebRManager(),
+    configurable: false,
+    enumerable: false,
+    writable: false
+  });
+}
+
+// Query strings create separate ES module instances. Keeping the manager on a
+// global Symbol makes app.js and the unchanged DEG runners share one webR.
+export const webrManager = globalThis[WEBR_MANAGER_GLOBAL_KEY];

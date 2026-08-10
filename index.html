@@ -11,7 +11,7 @@
     content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
   >
   <title>DEAR-OWL</title>
-  <link rel="stylesheet" href="./css/deseq-app.css?v=20260727">
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260810-shared-webr-manager">
 </head>
 <body>
   <header class="site-header">
@@ -26,6 +26,21 @@
   </header>
 
   <main class="app-shell">
+    <section id="localLaunchNotice" class="local-launch-notice">
+      <span class="local-launch-kicker">LOCAL STARTUP REQUIRED</span>
+      <h2>Open DEAR-OWL through localhost</h2>
+      <p>
+        Browsers cannot run DESeq2, web workers, or local file parsing from a directly opened
+        <code>index.html</code>. On Windows, double-click <code>start-local.cmd</code>.
+        On macOS or Linux, run <code>sh start-local.sh</code> in Terminal. A local browser
+        page will open automatically.
+      </p>
+      <p class="muted">
+        This does not upload the app or your count matrix to a remote server. Keep the launcher
+        window open while analyzing.
+      </p>
+    </section>
+
     <section class="status-strip" aria-live="polite">
       <div>
         <span class="status-label">Progress</span>
@@ -37,7 +52,7 @@
       </div>
       <div>
         <span class="status-label">Runtime</span>
-        <strong id="runtimeStatus">App 20260727 | webR not started</strong>
+        <strong id="runtimeStatus">App 20260810-shared-webr-manager | webR not started</strong>
       </div>
     </section>
 
@@ -62,6 +77,7 @@
         <select id="datasetSelect"></select>
         <div id="datasetInfo" class="dataset-info">Loading dataset catalog...</div>
         <div id="datasetLoadProgress" class="dataset-load-progress" hidden>
+          <div class="dataset-load-progress-phase">Data loading</div>
           <div class="dataset-load-progress-header">
             <span id="datasetLoadProgressLabel">Preparing dataset...</span>
             <span id="datasetLoadProgressPercent"></span>
@@ -94,6 +110,32 @@
         </div>
         <pre id="exampleMatrixPreview" class="example-matrix-preview" hidden></pre>
         <p id="uploadStatus" class="muted">No file selected. Files are parsed locally in this browser.</p>
+      </div>
+
+      <div class="analysis-preparation-panel" aria-labelledby="analysisPreparationTitle">
+        <div id="analysisPreparationTitle" class="dataset-load-progress-phase">Analysis preparation</div>
+        <p id="offlineStatus" class="analysis-preparation-summary">Load data to prepare the browser-based analysis engine.</p>
+        <div id="datasetPreparationProgress" class="dataset-load-progress" hidden>
+          <div class="dataset-load-progress-header">
+            <span id="datasetPreparationProgressLabel">Waiting for data</span>
+            <span id="datasetPreparationProgressPercent"></span>
+          </div>
+          <div
+            id="datasetPreparationProgressTrack"
+            class="dataset-load-progress-track"
+            role="progressbar"
+            aria-label="Analysis preparation progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <div id="datasetPreparationProgressBar" class="dataset-load-progress-bar"></div>
+          </div>
+          <div class="dataset-load-progress-details">
+            <span id="datasetPreparationProgressStage"></span>
+            <span id="datasetPreparationProgressBytes"></span>
+          </div>
+          <div id="datasetPreparationProgressLive" class="sr-only" aria-live="polite"></div>
+        </div>
       </div>
     </section>
 
@@ -151,27 +193,9 @@
         <h2><span class="step-number">STEP 5.</span> Set analysis parameters</h2>
       </div>
 
-      <div class="engine-panel">
-        <label class="engine-control">
-          <span>Analysis Engine</span>
-          <select id="analysisEngine">
-            <option value="deseq2" selected>R / DESeq2 (standard)</option>
-            <option value="javascript">High-speed pairwise Z-test (ultrafast)</option>
-          </select>
-        </label>
-      </div>
-
       <div class="parameter-grid">
         <label>
-          <div id="pModeField" class="p-mode-field" hidden>
-            <span>P-value correction mode</span>
-            <select id="p-mode">
-              <option value="fdr" selected>FDR (Benjamini-Hochberg)</option>
-              <option value="bonferroni">Bonferroni adjusted p-value</option>
-              <option value="raw">Raw p-value (no adjustment)</option>
-            </select>
-          </div>
-          <span id="pThreshLabel">FDR threshold</span>
+          <span>FDR threshold</span>
           <input id="fdrThreshold" type="number" min="0.000001" max="0.999999" step="0.01" value="0.05">
         </label>
         <label>
@@ -180,7 +204,7 @@
         </label>
         <label class="deseq2-only-param inline-check">
           <input id="preFiltering" type="checkbox" checked>
-          <span>Low-expression pre-filtering</span>
+          <span>Low-expression pre-filtering (DESeq2 only)</span>
         </label>
         <label>
           <span>Minimum total count across selected samples</span>
@@ -190,12 +214,12 @@
         <div class="parameter-with-help deseq2-only-param">
           <label class="inline-check">
             <input id="independentFiltering" type="checkbox" checked>
-            <span>DESeq2 independent filtering</span>
+            <span>DESeq2 independent filtering (DESeq2 only)</span>
           </label>
           <p class="parameter-help">After model fitting, DESeq2 uses mean normalized counts to omit low-power genes from multiple-testing adjustment.</p>
         </div>
         <label class="deseq2-only-param">
-          <span>Fit type</span>
+          <span>Fit type (DESeq2 only)</span>
           <select id="fitType">
             <option value="parametric">parametric</option>
             <option value="local">local</option>
@@ -203,7 +227,7 @@
           </select>
         </label>
         <label class="deseq2-only-param">
-          <span>Size-factor estimation</span>
+          <span>Size-factor estimation (DESeq2 only)</span>
           <select id="sfType">
             <option value="ratio" selected>ratio</option>
             <option value="poscounts">poscounts</option>
@@ -212,7 +236,7 @@
         </label>
         <div class="parameter-with-help deseq2-only-param">
           <label>
-            <span>Cook's cutoff</span>
+            <span>Cook's cutoff (DESeq2 only)</span>
             <select id="cooksCutoff">
               <option value="false">FALSE</option>
               <option value="true" selected>TRUE</option>
@@ -221,7 +245,7 @@
           <p class="parameter-help">May increase runtime. On slower or memory-limited systems, consider setting this to FALSE.</p>
         </div>
         <label class="deseq2-only-param">
-          <span>Test</span>
+          <span>Test (DESeq2 only)</span>
           <select id="testType">
             <option value="Wald">Wald</option>
             <option value="LRT">LRT</option>
@@ -269,7 +293,16 @@
       </div>
 
       <div class="run-actions">
-        <button id="runButton" type="button" disabled>Run DEG analysis</button>
+        <div class="run-engine-buttons">
+          <button id="runDeseq2Button" type="button" disabled>
+            <span class="run-button-title">Run DEG analysis</span>
+            <span class="run-button-engine">DESeq2 (standard)</span>
+          </button>
+          <button id="runZTestButton" type="button" disabled>
+            <span class="run-button-title">Run DEG analysis</span>
+            <span class="run-button-engine">Pairwise Z-test (for fast screening)</span>
+          </button>
+        </div>
         <button id="cancelButton" type="button" disabled>Stop analysis</button>
       </div>
 
@@ -308,6 +341,7 @@
 
   </main>
 
-  <script type="module" src="./js/app.js?v=20260727"></script>
+  <script src="./js/local-launch-guard.js?v=20260810-shared-webr-manager"></script>
+  <script type="module" src="./js/app-bootstrap-20260810-shared-webr-manager.js"></script>
 </body>
 </html>

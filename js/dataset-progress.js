@@ -115,6 +115,9 @@ function estimatedPercentForStage(stage, progressPercent, fallbackPercent = null
     }
     return fallbackPercent ?? 1;
   }
+  if (progressPercent !== null) {
+    return clamp(progressPercent, 0, 100);
+  }
 
   const estimates = new Map([
     [DEFAULT_STAGE, 0],
@@ -236,6 +239,8 @@ export function createDatasetLoadProgressController(elements, options = {}) {
     });
   const setTimer = options.setTimer || setTimeout;
   const clearTimer = options.clearTimer || clearTimeout;
+  const hideOnComplete = options.hideOnComplete !== false;
+  const completeStage = String(options.completeStage || COMPLETE_STAGE);
 
   let state = { ...DATASET_LOAD_PROGRESS_INITIAL_STATE };
   let activeLoadId = 0;
@@ -404,13 +409,17 @@ export function createDatasetLoadProgressController(elements, options = {}) {
       completed: true,
       error: false,
       mode: "determinate",
-      stage: COMPLETE_STAGE,
+      stage: completeStage,
       loadedBytes: event.loadedBytes ?? state.loadedBytes,
       totalBytes: event.totalBytes ?? state.totalBytes,
       percent: 100,
       estimated: false
     };
     render(true);
+
+    if (!hideOnComplete) {
+      return true;
+    }
 
     const completedLoadId = loadId;
     hideTimer = setTimer(() => {
