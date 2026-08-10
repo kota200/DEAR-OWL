@@ -281,6 +281,35 @@ a {
   color: var(--ink);
 }
 
+.dataset-load-progress-phase {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.analysis-preparation-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  border: 1px solid #c9d9eb;
+  border-radius: 7px;
+  padding: 12px;
+  background: #f7fbff;
+}
+
+.analysis-preparation-panel .dataset-load-progress {
+  margin-top: 0;
+  background: #fff;
+}
+
+.analysis-preparation-summary {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .dataset-load-progress-header,
 .dataset-load-progress-details {
   display: flex;
@@ -492,7 +521,8 @@ a {
 .contrast-controls,
 .custom-contrast-row,
 .multi-result-header,
-.overlap-set-grid {
+.overlap-set-grid,
+.overlap-figure-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -581,25 +611,220 @@ a {
   align-items: flex-start;
 }
 
+.venn-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.venn-direction-control {
+  display: grid;
+  gap: 4px;
+  flex: 0 0 230px;
+}
+
+.venn-direction-control span {
+  color: var(--muted);
+  font-size: 0.93rem;
+  font-weight: 700;
+}
+
+.venn-direction-note {
+  flex: 1 1 460px;
+  margin: 0 0 7px;
+}
+
 .overlap-set-grid label {
   flex: 1 1 260px;
+}
+
+.overlap-selection-status {
+  margin: 0;
+}
+
+.overlap-diagram-warning {
+  margin: 0;
 }
 
 .overlap-output {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
-.venn-svg {
-  width: min(100%, 760px);
-  min-height: 260px;
+.overlap-figure {
+  width: 100%;
+  margin: 0;
+}
+
+.overlap-figure-title {
+  margin: 4px 0 8px;
+}
+
+.overlap-figure-header {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.overlap-figure-header .overlap-figure-title {
+  margin: 0;
+}
+
+.venn-figure,
+.euler-figure {
+  overflow-x: auto;
+}
+
+.venn-svg,
+.euler-svg {
+  display: block;
+  width: min(100%, 1200px);
+  min-width: 900px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fbfcfd;
 }
 
-.overlap-table {
+.venn-svg {
+  aspect-ratio: 1200 / 740;
+}
+
+.euler-svg {
+  aspect-ratio: 1200 / 720;
+}
+
+.venn-set-label {
+  fill: var(--ink);
+  font-size: 21px;
+  font-weight: 800;
+}
+
+.venn-count {
+  fill: var(--ink);
+  stroke: #fff;
+  stroke-width: 7px;
+  paint-order: stroke fill;
+  font-size: 23px;
+  font-weight: 900;
+}
+
+.euler-set-code {
+  fill: var(--ink);
+  stroke: #fff;
+  stroke-width: 6px;
+  paint-order: stroke fill;
+  font-size: 25px;
+  font-weight: 900;
+}
+
+.euler-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 6px 18px;
+  max-width: 1200px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.euler-legend li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.euler-legend-code {
+  display: inline-grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 900;
+}
+
+.upset-viewport {
+  width: 100%;
+  overflow-x: auto;
   border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.upset-svg {
+  display: block;
+  max-width: none;
+}
+
+.upset-grid-line,
+.upset-row-guide {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.upset-bar,
+.upset-connector,
+.upset-dot.is-included {
+  fill: var(--ink);
+  stroke: var(--ink);
+}
+
+.upset-connector {
+  stroke-width: 3;
+}
+
+.upset-dot {
+  fill: #d9dee4;
+  stroke: #d9dee4;
+}
+
+.upset-axis-title,
+.upset-set-label {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.upset-axis-label,
+.upset-count-label {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.venn-caption {
+  max-width: 1200px;
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.93rem;
+}
+
+.overlap-table-wrap {
+  max-width: 1200px;
+}
+
+.overlap-table {
+  width: 100%;
+  border: 1px solid var(--line);
+}
+
+.overlap-table th:first-child,
+.overlap-table td:first-child {
+  min-width: 520px;
+  white-space: normal;
+}
+
+.overlap-table th:last-child,
+.overlap-table td:last-child {
+  width: 150px;
+  white-space: nowrap;
 }
 
 .sample-controls,
@@ -625,6 +850,38 @@ a {
 
 .sample-actions {
   margin: 10px 0;
+}
+
+.run-actions {
+  align-items: stretch;
+  gap: 12px;
+}
+
+.run-engine-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 0 1 550px;
+  width: min(100%, 550px);
+  gap: 12px;
+}
+
+.run-engine-buttons button {
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  width: 100%;
+  min-height: 64px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.run-button-title,
+.run-button-engine {
+  display: block;
+}
+
+#cancelButton {
+  flex: 0 0 auto;
 }
 
 .analysis-activity {
@@ -719,37 +976,6 @@ tbody tr:hover {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-auto-rows: minmax(132px, auto);
   align-items: stretch;
-}
-
-.engine-panel {
-  margin-bottom: 16px;
-  border-left: 4px solid var(--accent);
-  border-radius: 6px;
-  padding: 12px;
-  background: #f8fafc;
-}
-
-.engine-control,
-.p-mode-field {
-  display: grid;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.engine-control select {
-  width: 100%;
-  height: 42px;
-  max-width: none;
-}
-
-.p-mode-field {
-  margin-bottom: 8px;
-}
-
-.engine-muted {
-  opacity: 0.45;
 }
 
 .parameter-grid label {
@@ -1138,6 +1364,19 @@ tbody tr:hover {
     flex-direction: column;
     gap: 3px;
   }
+
+  .run-actions {
+    flex-direction: column;
+  }
+
+  .run-engine-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .run-engine-buttons button,
+  #cancelButton {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1150,4 +1389,32 @@ tbody tr:hover {
     width: 38%;
     animation: none;
   }
+}
+.local-launch-notice {
+  border: 1px solid #e0ad4f;
+  border-left: 6px solid #d98713;
+  border-radius: 14px;
+  background: #fff8e8;
+  padding: 1.5rem 1.75rem;
+  color: #182a3c;
+}
+
+.local-launch-notice[hidden] {
+  display: none;
+}
+
+.local-launch-notice h2 {
+  margin: 0.35rem 0 0.75rem;
+}
+
+.local-launch-notice p {
+  max-width: 74rem;
+  line-height: 1.65;
+}
+
+.local-launch-kicker {
+  color: #9a5700;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
 }

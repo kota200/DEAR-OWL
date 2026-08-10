@@ -1,68 +1,141 @@
-# DEAR-OWL (Differential Expression Analysis Resource on the Web (Lite))
+# DEAR-OWL
 
-DEAR-OWL is a static browser application for two-group differential gene
-expression analysis of plant RNA-seq count data.
+**DEAR-OWL (Differential Expression Analysis Resource on the Web, Lite)** is a
+browser-based application for differential gene expression analysis of plant
+RNA-seq count data. It can be used in two ways:
 
-The app can analyze GExA-style public datasets or user-uploaded raw count
-matrices. It runs in the browser with webR and DESeq2, so no server-side
-analysis API is required.
+- as the hosted GExA-connected web application; or
+- as a locally runnable application for a count matrix on the user's computer.
 
-## Features
+In both modes, the statistical computation runs inside the browser through
+webR. An uploaded count matrix is parsed locally and is never uploaded to an
+application server. After the input files and analysis runtime are ready,
+DEAR-OWL locks analysis requests to browser-local files so the DEG calculation
+does not communicate with the server.
 
-- Select public GExA-style RNA-seq datasets from a static catalog.
-- Upload a raw count matrix in CSV, TSV, TXT, or gzip format.
-- Select control and treatment samples from metadata tables.
-- Run DESeq2 in the browser through webR.
-- Use an optional high-speed JavaScript screening engine.
-- Generate result tables, normalized counts, MA plots, volcano plots, PCA plots,
-  and heatmaps.
-- Add TPM and homolog annotation columns when configured source files are
-  available.
-- Download result tables, significant gene lists, plots, and analysis summaries.
+## The three promises of DEAR-OWL
 
-## Repository Contents
+1. **Your uploaded data is not sent to the server.** A user-supplied count
+   matrix is read and parsed inside the browser.
+2. **Analysis runs without communication after preparation.** When data and the
+   analysis environment are ready, a network lock restricts the DEG run to
+   cached or local files.
+3. **DEAR-OWL runs locally.** The same application can be launched on Windows,
+   macOS, and Linux for private analysis of a count matrix on that computer.
+
+GExA mode necessarily communicates before analysis to obtain the dataset
+selected by the user. It does not load the entire catalog, and the subsequent
+DEG calculation is still performed under the network lock.
+
+## Use DEAR-OWL
+
+### Hosted application
+
+Open [DEAR-OWL](https://webpark2116.sakura.ne.jp/deseq2/) to use a published
+GExA dataset or upload a count matrix.
+
+### Local application
+
+Download or clone the complete repository, including `webr/` and `library/`,
+then use the launcher for your operating system:
+
+- **Windows:** double-click `start-local.cmd`. No Python or Node.js installation
+  is required.
+- **macOS or Linux:** open a terminal in the repository directory and run
+  `sh start-local.sh`. The launcher uses Python 3 when available and otherwise
+  uses Node.js.
+- **macOS Finder:** run `chmod +x start-local.command` once, then double-click
+  `start-local.command`.
+
+The launcher opens `http://127.0.0.1:8766/?mode=upload`. Keep its window or
+terminal open while using DEAR-OWL; press Ctrl+C or close the window to stop it.
+The server binds only to the loopback address, so it is available only on the
+same computer.
+
+Do not open `index.html` directly with a `file://` URL. Modern browsers do not
+allow the JavaScript modules, module workers, WebAssembly, and Service Worker
+used by webR to operate correctly from `file://`. The local launcher supplies
+these browser requirements without publishing the app or the count matrix to a
+remote server.
+
+Local launch is intended for **Upload count matrix** analysis. GExA datasets
+remain outside this repository under `/RNADB/Download/files/`, so use the
+hosted application when those server datasets are needed.
+
+## Data and network behavior
+
+| Input mode | Data acquisition | Data retained in memory | DEG analysis |
+|---|---|---|---|
+| Uploaded count matrix | The browser reads the user-selected file directly. It is not uploaded. | The current count matrix and selected samples. | Runs in the browser with network access locked to cached/local files. |
+| GExA dataset | The hosted app fetches only the dataset selected in Step 1 from `/RNADB/Download/files/`. | Sample metadata and gene order first; selected sample count vectors are materialized later. | Runs in the browser with network access locked after preparation. |
+
+DEAR-OWL does **not** download every GExA dataset at startup. A catalog in
+`config/datasets.json` supplies lightweight dataset metadata. When a user
+chooses one entry, the app streams that dataset's compressed count matrix and
+stores the compressed response in browser Cache Storage. Because the current
+GExA format places all samples in one `.csv.gz`, the selected dataset file must
+be transferred once; the decompressed full matrix is not retained as a large
+JavaScript string. After group selection, the cached file is streamed again
+and only the chosen sample rows are converted to count vectors.
+
+The interface reports this as two separate stages:
+
+1. **Data loading** — transfer and metadata scan for the selected input.
+2. **Analysis preparation** — cache verification and webR/DESeq2 startup.
+
+The run buttons are enabled only when preparation is complete. The ready webR
+runtime is reused for analysis instead of being initialized a second time.
+Only the latest selected GExA dataset is retained in the dedicated data cache.
+
+"No communication during analysis" refers to the DEG calculation after these
+preparation stages. A hosted GExA dataset must first be downloaded, and a
+browser with an empty cache must first load the bundled webR/DESeq2 assets.
+
+## Supported analyses
+
+- Two-group control-versus-treatment comparison.
+- One-factor multi-group comparison with three or more groups.
+- DESeq2 standard analysis in webR.
+- Pairwise Z-test for fast screening.
+- Optional global likelihood-ratio test for multi-group DESeq2 analysis.
+- MA and volcano plots, with optional PCA, correlation, and distance plots.
+- Downloadable result tables and analysis metadata.
+
+DESeq2 requires raw, non-negative integer counts. TPM values may be added for
+expression context, but they are not used for statistical testing.
+
+## Uploaded count matrix format
+
+The app accepts CSV, TSV, TXT, and gzip-compressed files with genes as rows:
 
 ```text
-.
-├── index.html              # Main DEAR-OWL application
-├── help.html               # User help page
-├── config/                 # Dataset catalog
-├── css/                    # Application styles
-├── js/                     # Application logic and analysis runners
-├── library/                # Browser-side R and DESeq2 library image
-├── scripts/                # Dataset and runtime preparation scripts
-├── tests/                  # Local validation scripts and fixtures
-├── webr/                   # webR runtime files
-└── wiki/                   # Project wiki pages in Markdown
+gene_id,control_1,control_2,treatment_1,treatment_2
+gene0001,10,12,40,38
+gene0002,20,18,25,29
 ```
 
-## Quick Start
+Requirements:
 
-Serve the repository root with cross-origin isolation headers. The helper server
-used during development is:
+- The first row is a header.
+- The first column contains unique, non-empty gene IDs.
+- Every remaining column represents one sample and has a unique name.
+- Counts are non-negative integers within the R integer range.
+- At least two sample columns are required.
 
-```powershell
-node .\tests\serve-cross-origin-isolated.mjs 8766 ..
+## GExA data deployment
+
+GExA matrices are deliberately not stored in this repository. The shared data
+location is configured in `js/config.js`:
+
+```javascript
+externalDataBaseUrl: "/RNADB/Download/files/"
 ```
 
-Then open:
+`config/datasets.json` is the catalog of file names and dataset metadata.
+Count, TPM fallback, gene-length, and annotation files stay in the server's
+separate RNADB directory. There is no application `data/` directory.
 
-```text
-http://127.0.0.1:8766/DEG-on-Web/
-```
-
-If the folder is deployed as `/deseq2/`, open:
-
-```text
-https://example.org/deseq2/
-```
-
-## Input Data
-
-DESeq2 requires raw integer read counts. TPM values can be shown as expression
-context, but they are not used for statistical testing.
-
-The default GExA-style matrix orientation is sample rows:
+For the current sample-row GExA format, metadata columns precede gene columns:
 
 ```text
 BioProject,SRA,BioSample,treatment,tissue,stage,cultivar,code,temperature,attributes,gene0001,gene0002
@@ -70,87 +143,74 @@ PRJ...,SRR...,SAMN...,control,leaf,...,...,...,...,...,10,20
 PRJ...,SRR...,SAMN...,treated,leaf,...,...,...,...,...,40,25
 ```
 
-The app also supports gene-row count matrices:
+See [Dataset Catalog](wiki/Dataset-Catalog.md) before adding or changing a
+dataset.
+
+## Browser storage and privacy
+
+- Uploaded matrices remain in browser memory and are not sent to a remote
+  application server.
+- Runtime and selected GExA files are stored in browser Cache Storage so they
+  can be reused during analysis.
+- DEAR-OWL requests persistent browser storage when supported. If it is denied,
+  the cache remains usable but the browser may evict it later.
+- If a required asset is missing or storage quota is exhausted, analysis stays
+  disabled instead of silently reverting to network access.
+- Clearing site data removes the cached runtime and GExA dataset.
+
+Current Chrome or Edge is recommended. Large datasets can require substantial
+memory and preparation time; closing unrelated tabs and selecting only needed
+samples can help on memory-limited systems.
+
+## Repository layout
 
 ```text
-gene_id,sample_A,sample_B
-gene0001,10,40
-gene0002,20,25
+.
+|-- index.html                 Main application
+|-- help.html                  In-app manual
+|-- start-local.cmd            Windows local launcher
+|-- start-local.sh             macOS/Linux local launcher
+|-- start-local.command        Optional macOS Finder launcher
+|-- sw.js                      Offline/cache and analysis network lock
+|-- config/datasets.json       GExA dataset catalog
+|-- css/                       Styles
+|-- js/                        UI, data loading, storage, and analysis code
+|-- scripts/                   Loopback-only local servers
+|-- tests/                     Automated and browser checks
+|-- webr/                      Bundled webR runtime
+|-- library/                   Bundled DESeq2 R library image
+`-- wiki/                      Detailed documentation
 ```
 
-## Dataset Catalog
+## Documentation
 
-Datasets are configured in `config/datasets.json`. Each entry defines metadata
-and source file names for counts, gene lengths, TPM fallback data, and optional
-annotation.
+- [Wiki home](wiki/Home.md)
+- [User guide](wiki/User-Guide.md)
+- [Local use and privacy](wiki/Local-Use-and-Privacy.md)
+- [Dataset catalog](wiki/Dataset-Catalog.md)
+- [Deployment](wiki/Deployment.md)
+- [Development and validation](wiki/Development.md)
 
-The production configuration currently expects external count and annotation
-files under:
+## Deployment summary
 
-```javascript
-externalDataBaseUrl: "/RNADB/Download/files/"
-```
+Deploy the complete repository to the web directory. On Apache-compatible
+hosting, include the hidden `.htaccess` file; it supplies the COOP/COEP/CORP
+headers used by webR. Keep `webr/`, `library/`, and `sw.js` in the deployment.
+The external GExA files remain separately under `/RNADB/Download/files/`.
 
-Update `js/config.js` if the public data files are hosted at a different path.
-
-## Recommended Analysis Practice
-
-As a rule, DEG analysis should compare samples within the same BioProject.
-When sample metadata are unclear, inspect the BioProject, BioSample, and SRA
-records. If possible, trace the BioProject accession to the original publication
-and confirm treatment, genotype, tissue, developmental stage, replicate
-structure, and batch information before analysis.
+See [Deployment](wiki/Deployment.md) for the complete checklist.
 
 ## Validation
 
-Run JavaScript syntax checks and unit tests with Node.js:
+With Node.js available:
 
-```powershell
-Get-ChildItem -LiteralPath .\js -Filter *.js | ForEach-Object { node --check $_.FullName }
-node .\tests\unit-tests.mjs
-node .\tests\validate-runner-r.mjs
+```sh
+node tests/unit-tests.mjs
+node tests/offline-service-worker-tests.mjs
+node tests/validate-staged-r.mjs
+node tests/validate-runner-r.mjs
 ```
 
-The test suite covers delimiter handling, count validation, DEG classification,
-normalized-count generation, CSV escaping, URL generation, and direct raw dataset
-loading.
-
-## Deployment
-
-Deploy all files in this repository to a static web directory. The `.htaccess`
-file is required on Apache-compatible hosting because it sets COOP and COEP
-headers for cross-origin isolation.
-
-The webR runtime and DESeq2 library image are included in this repository:
-
-```javascript
-baseUrl: "./webr/",
-libraryDataUrl: "./library/library.data.gz",
-libraryMetadataUrl: "./library/library.js.metadata",
-workerLibraryDataUrl: "./library/library-uncompressed.data"
-```
-
-## Wiki
-
-Project wiki pages are stored in the `wiki/` directory:
-
-- `wiki/Home.md`
-- `wiki/User-Guide.md`
-- `wiki/Dataset-Catalog.md`
-- `wiki/Deployment.md`
-- `wiki/Development.md`
-
-These files can also be copied into the GitHub Wiki if the repository wiki
-feature is enabled.
-
-## License
-
-No project-level license has been selected yet. Choose a license with the
-project supervisor before public reuse is allowed. Bundled third-party
-components, including webR, R packages, and DESeq2, retain their own licenses.
-
-## Acknowledgments
-
-DEAR-OWL uses webR and Bioconductor DESeq2. Public expression datasets are
-intended to be used with appropriate citation of their original BioProject,
-BioSample, SRA records, and source publications.
+`validate-runner-r.mjs` uses a local R installation when available. See
+[Development and validation](wiki/Development.md) for syntax checks, browser
+checks, and the release checklist.

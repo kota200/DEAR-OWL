@@ -11,7 +11,7 @@
     content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
   >
   <title>Help | DEAR-OWL</title>
-  <link rel="stylesheet" href="./css/deseq-app.css?v=20260727">
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260810-run-buttons">
 </head>
 <body class="help-page">
   <header class="site-header">
@@ -56,6 +56,9 @@
       </div>
       <ul class="manual-list">
         <li><strong>Input data</strong>: Select a GExA dataset or upload a raw count matrix. The first column should contain gene IDs. The remaining columns should contain sample counts.</li>
+        <li><strong>GExA loading</strong>: Dataset selection streams the external count CSV once and stores its compressed response in the browser. The <strong>Data loading</strong> bar covers this transfer and metadata scan. Only sample metadata and gene order remain in memory; selected count rows are extracted from the cached CSV later.</li>
+        <li><strong>Analysis preparation</strong>: After data loading reaches 100%, a separate bar reports browser storage, PostMessage-compatible webR and DESeq2 startup, R package loading, and final file verification. DEG analysis becomes available only after this second bar completes, and reuses the same ready runtime without starting webR again.</li>
+        <li><strong>Uploaded files</strong>: Uploaded count matrices stay inside the browser and are not sent to the application server.</li>
         <li><strong>Sample groups</strong>: For two-group comparison, select control and treatment samples. For multi-group comparison, create three or more groups. At least two samples are required per group. Three or more biological replicates are recommended.</li>
         <li><strong>Comparable conditions</strong>: As a rule, compare samples within the same BioProject. The main difference between groups should be the treatment or condition of interest.</li>
         <li><strong>Browser resources</strong>: The analysis runs locally in the browser. Large datasets may require more time and memory.</li>
@@ -74,7 +77,7 @@
         </div>
         <div>
           <h3>Status Strip</h3>
-          <p>The status strip shows progress, estimated memory use, and the webR runtime state.</p>
+          <p>The status strip shows progress and estimated memory use.</p>
         </div>
         <div>
           <h3>Sample Tables</h3>
@@ -97,11 +100,11 @@
         <li>If using a GExA dataset, choose a dataset from the dropdown menu and check the dataset information.</li>
         <li>If uploading a count matrix, select a CSV, TSV, TXT, or gzip file. Count values must be non-negative integers.</li>
         <li>For two-group comparison, select control samples and treatment samples. In principle, select samples from one BioProject and keep tissue, stage, and cultivar consistent.</li>
-        <li>For multi-group comparison, create groups, assign samples, select the reference group and comparison scope, and optionally run the DESeq2 global LRT.</li>
+        <li>For multi-group comparison, create groups, assign samples, select the reference group and comparison scope, and optionally enable the global LRT marked <strong>(DESeq2 only)</strong>.</li>
         <li>If sample information is unclear, check the BioProject, BioSample, or SRA record. If possible, trace the BioProject accession to the original publication before running the analysis.</li>
-        <li>Set the analysis engine and thresholds. A useful starting point is DESeq2, FDR 0.05, and absolute log2 fold change 1.</li>
+        <li>In Step 5, set the thresholds and DESeq2-specific parameters. The analysis engine is not selected in Step 5.</li>
         <li>Select plots. MA and volcano plots are useful for pairwise contrasts. PCA and heatmap plots may be slower for large datasets.</li>
-        <li>Check any warnings. Then click <strong>Run DEG analysis</strong>.</li>
+        <li>In Step 7, choose the method by clicking <strong>Run DEG analysis DESeq2 (standard)</strong> or <strong>Run DEG analysis Pairwise Z-test (for fast screening)</strong>.</li>
         <li>In Results, review the summary, result table, plots, downloads, and analysis log. Interpret DEG in the context of the study design.</li>
       </ol>
     </section>
@@ -126,7 +129,7 @@
       <div class="step-head">
         <h2>Multi-group Comparison</h2>
       </div>
-      <p>Multi-group comparison is for one categorical factor with three or more groups. In DESeq2 mode, the global multi-group question is tested with LRT, while selected two-group contrasts are reported with Wald results. Batch terms, paired designs, interactions, and time-series models are not included in this mode.</p>
+      <p>Multi-group comparison is for one categorical factor with three or more groups. When the R/DESeq2 button is used, the global multi-group question is tested with LRT, while selected two-group contrasts are reported with Wald results. Batch terms, paired designs, interactions, and time-series models are not included in this mode.</p>
       <div class="manual-two-column">
         <div>
           <h3>Comparison Scopes</h3>
@@ -146,7 +149,7 @@
         </div>
         <div>
           <h3>High-speed Pairwise Z-test</h3>
-          <p>High-speed pairwise Z-test performs independent pairwise comparisons using library-size-normalized log2 CPM values. No global or omnibus test is performed in ultrafast mode.</p>
+          <p>High-speed pairwise Z-test performs independent pairwise comparisons using library-size-normalized log2 CPM values. No global or omnibus test is performed. Multiple-testing correction is always Benjamini-Hochberg FDR; there is no Correction mode selector.</p>
         </div>
         <div>
           <h3>Overlap Views</h3>
@@ -162,25 +165,25 @@
       </div>
       <div class="manual-two-column">
         <div>
-          <h3>Analysis Engine</h3>
-          <p><strong>R / DESeq2 (standard)</strong> is recommended for formal analysis. <strong>High-speed pairwise Z-test</strong> is intended for rapid screening.</p>
+          <h3>Choose the Method in Step 7</h3>
+          <p><strong>Run DEG analysis R/DESeq2 (standard)</strong> runs the existing R/DESeq2 analysis and is recommended for formal analysis. <strong>Run DEG analysis High speed pairwise Z-test (ultrafast)</strong> runs the rapid pairwise Z-test.</p>
         </div>
         <div>
           <h3>Thresholds</h3>
-          <p>A gene is counted as Up or Down only when both the significance threshold and the absolute log2 fold change threshold are met.</p>
+          <p>FDR threshold, absolute log2 fold-change threshold, and minimum total count apply to both methods. A gene is counted as Up or Down only when both the FDR and fold-change thresholds are met.</p>
         </div>
         <div>
           <h3>Filtering</h3>
-          <p><strong>Low-expression pre-filtering</strong> removes genes with very low counts before model fitting. The default setting is suitable for most first runs.</p>
+          <p><strong>Minimum total count</strong> filters low-count genes in both methods. The separate <strong>Low-expression pre-filtering (DESeq2 only)</strong> control applies only to DESeq2.</p>
         </div>
         <div>
-          <h3>DESeq2 Options</h3>
-          <p>The default size-factor estimation is <strong>ratio</strong>. For sparse GExA-style matrices, <strong>poscounts</strong> may help if DESeq2 reports normalization problems.</p>
+          <h3>DESeq2 Options (DESeq2 only)</h3>
+          <p>The default size-factor estimation is <strong>ratio</strong>. For sparse GExA-style matrices, <strong>poscounts</strong> may help if DESeq2 reports normalization problems. All parameters labeled <strong>(DESeq2 only)</strong> are ignored by the High speed pairwise Z-test.</p>
         </div>
       </div>
       <h3 class="manual-subhead">Recommended First Run</h3>
       <ul class="manual-list">
-        <li>Use <strong>R / DESeq2 (standard)</strong> for the main analysis.</li>
+        <li>Use <strong>Run DEG analysis R/DESeq2 (standard)</strong> for the main analysis.</li>
         <li>Use <strong>FDR threshold = 0.05</strong> as a common starting point for multiple-testing correction.</li>
         <li>Use <strong>absolute log2 fold change threshold = 1</strong> to focus on genes with at least a two-fold difference.</li>
         <li>Keep <strong>Low-expression pre-filtering</strong> enabled for most datasets.</li>
@@ -190,38 +193,38 @@
       <div class="manual-two-column">
         <div>
           <h3>FDR Threshold</h3>
-          <p>FDR is the adjusted p-value after testing many genes. A lower value is stricter and gives fewer DEG.</p>
+          <p>FDR is the adjusted p-value after testing many genes. A lower value is stricter and gives fewer DEG. This threshold applies to both methods; the Z-test always uses Benjamini-Hochberg adjusted values.</p>
         </div>
         <div>
           <h3>Log2 Fold Change Threshold</h3>
-          <p>This controls the minimum effect size. A value of 1 means a two-fold increase or decrease.</p>
+          <p>This controls the minimum effect size for Up, Down, and NS classification in both methods. A value of 1 means a two-fold increase or decrease.</p>
         </div>
         <div>
           <h3>Minimum Total Count</h3>
-          <p>Genes with total counts below this value across selected samples are removed before testing.</p>
+          <p>Genes with total counts below this value across selected samples are removed before testing in both methods.</p>
         </div>
         <div>
-          <h3>Independent Filtering</h3>
+          <h3>Independent Filtering (DESeq2 only)</h3>
           <p>DESeq2 can remove genes with low statistical power during result generation. This is usually helpful.</p>
         </div>
         <div>
-          <h3>Fit Type</h3>
+          <h3>Fit Type (DESeq2 only)</h3>
           <p>This controls dispersion fitting in DESeq2. Use parametric first. Try local or mean only if DESeq2 reports a fit problem.</p>
         </div>
         <div>
-          <h3>Size-factor Estimation</h3>
+          <h3>Size-factor Estimation (DESeq2 only)</h3>
           <p>Use poscounts for sparse matrices with many zeros. This is often suitable for large public GExA-style datasets.</p>
         </div>
         <div>
-          <h3>Cook's Cutoff</h3>
+          <h3>Cook's Cutoff (DESeq2 only)</h3>
           <p>Cook's cutoff detects influential samples and is enabled by default. It may increase runtime; on slower or memory-limited systems, consider setting it to FALSE.</p>
         </div>
         <div>
-          <h3>Test</h3>
+          <h3>Test (DESeq2 only)</h3>
           <p>This setting applies to two-group DESeq2 runs. In multi-group DESeq2 mode, the app automatically uses LRT for the global test and Wald results for the selected pairwise contrasts.</p>
         </div>
       </div>
-      <p class="manual-note">If you are uncertain, start with the default settings. Change parameters only when warnings, sample design, or a clear analysis plan requires it.</p>
+      <p class="manual-note">If you are uncertain, start with the default settings. Parameters labeled <strong>(DESeq2 only)</strong> remain visible in Step 5 but do not affect High speed pairwise Z-test results.</p>
     </section>
 
     <section id="results" class="step-card">
@@ -267,7 +270,7 @@
         <li>Do not select DEG by p-value alone. Use adjusted p-value, effect size, expression level, and study design together.</li>
         <li>Check whether control and treatment samples separate as expected in PCA or heatmaps. Unexpected separation may indicate batch effects or mislabeled samples.</li>
         <li>Genes with large fold change but very low expression may be unstable. Check baseMean and TPM before prioritizing them.</li>
-        <li>Report the selected thresholds, sample groups, BioProject, analysis engine, and main parameter settings with the results.</li>
+        <li>Report the selected thresholds, sample groups, BioProject, analysis method selected in Step 7, and main parameter settings with the results.</li>
       </ul>
     </section>
 
@@ -276,7 +279,7 @@
         <h2>Troubleshooting</h2>
       </div>
       <ul class="manual-list">
-        <li><strong>The Run button is disabled</strong>: Select at least two control samples and two treatment samples.</li>
+        <li><strong>The Run buttons are disabled</strong>: Select at least two control samples and two treatment samples.</li>
         <li><strong>Loading takes a long time</strong>: Large datasets can be slow on first access. Reload the page if loading does not finish.</li>
         <li><strong>The uploaded file fails</strong>: Check that counts are integers and that there are no negative values, empty cells, duplicate sample names, or duplicate gene IDs.</li>
         <li><strong>DESeq2 fails</strong>: Try size-factor estimation with poscounts, set Cook's cutoff to FALSE, and disable heavy plots.</li>

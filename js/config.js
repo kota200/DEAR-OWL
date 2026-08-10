@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  appVersion: "20260727",
+  appVersion: "20260810-shared-webr-manager",
   datasetCatalogUrl: "./config/datasets.json?v=20260717-gene-length",
   externalDataBaseUrl: "/RNADB/Download/files/",
   defaultPageSize: 100,

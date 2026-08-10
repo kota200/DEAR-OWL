@@ -16,6 +16,7 @@ import {
   calculateProgressPercent,
   createDatasetLoadProgressController
 } from "../js/dataset-progress.js";
+import { runAfterDomReady } from "../js/dom-ready.js";
 import {
   loadAnnotations,
   loadDatasetBundle,
@@ -39,16 +40,24 @@ import {
 import { runPairwiseZTest } from "../js/fast-ztest.js";
 import {
   buildGroupedColDataCsv,
-  MAX_MULTI_GROUP_CONTRASTS
+  MAX_MULTI_GROUP_CONTRASTS,
+  MultiGroupController
 } from "../js/multi-group-controller.js";
 import { runMultiGroupFastAnalysis } from "../js/multi-group-fast-runner.js";
 import { buildStagedMultiGroupDeseq2Stages } from "../js/multi-group-staged-runner.js";
 import {
   buildDirectionMatrix,
   buildGeneSet,
-  computeExclusiveIntersections
+  computeExclusiveIntersections,
+  describeIntersectionMembership
 } from "../js/intersections.js";
-import { getWebRChannelSupport } from "../js/webr-manager.js";
+import {
+  chooseWebRChannel,
+  getWebRChannelSupport,
+  getWebROfflineAssetUrls,
+  WebRManager,
+  webrManager
+} from "../js/webr-manager.js";
 import {
   APP_CONFIG,
   COLUMN_LABELS,
@@ -62,15 +71,28 @@ import {
 const fixtureDir = new URL("./fixtures/", import.meta.url);
 const appRoot = new URL("../", import.meta.url);
 const virtualFiles = new Map();
+const fetchedUrls = [];
 globalThis.window = { location: { href: appRoot.href } };
 
 const indexHtml = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const helpHtml = fs.readFileSync(new URL("../help.html", import.meta.url), "utf8");
 const appSource = fs.readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
+const fastZTestSource = fs.readFileSync(new URL("../js/fast-ztest.js", import.meta.url), "utf8");
 const cssSource = fs.readFileSync(new URL("../css/deseq-app.css", import.meta.url), "utf8");
 const runnerSource = fs.readFileSync(new URL("../js/deseq-runner.js", import.meta.url), "utf8");
 const stagedRunnerSource = fs.readFileSync(new URL("../js/deseq-staged-runner.js", import.meta.url), "utf8");
 const multiGroupRunnerSource = fs.readFileSync(new URL("../js/multi-group-runner.js", import.meta.url), "utf8");
 const multiGroupStagedRunnerSource = fs.readFileSync(new URL("../js/multi-group-staged-runner.js", import.meta.url), "utf8");
+const multiGroupControllerSource = fs.readFileSync(new URL("../js/multi-group-controller.js", import.meta.url), "utf8");
+const multiGroupResultsSource = fs.readFileSync(new URL("../js/multi-group-results.js", import.meta.url), "utf8");
+const offlineSupportSource = fs.readFileSync(new URL("../js/offline-support.js", import.meta.url), "utf8");
+const serviceWorkerSource = fs.readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+const appBootstrapSource = fs.readFileSync(new URL("../js/app-bootstrap-20260810-shared-webr-manager.js", import.meta.url), "utf8");
+const localLaunchGuardSource = fs.readFileSync(new URL("../js/local-launch-guard.js", import.meta.url), "utf8");
+const localPowerShellServerSource = fs.readFileSync(new URL("../scripts/serve-local.ps1", import.meta.url), "utf8");
+const localPythonServerSource = fs.readFileSync(new URL("../scripts/serve-local.py", import.meta.url), "utf8");
+const localNodeServerSource = fs.readFileSync(new URL("../scripts/serve-local.mjs", import.meta.url), "utf8");
+const localShellLauncherSource = fs.readFileSync(new URL("../start-local.sh", import.meta.url), "utf8");
 
 function readFixture(name) {
   return fs.readFileSync(new URL(name, fixtureDir), "utf8");
@@ -78,6 +100,7 @@ function readFixture(name) {
 
 globalThis.fetch = async (specifier) => {
   const url = new URL(specifier, appRoot);
+  fetchedUrls.push(url.href);
 
   if (virtualFiles.has(url.href)) {
     const body = virtualFiles.get(url.href);
@@ -174,7 +197,7 @@ function progressElements() {
   };
 }
 
-function progressController(elements, timers = []) {
+function progressController(elements, timers = [], options = {}) {
   return createDatasetLoadProgressController(elements, {
     hideDelayMs: 500,
     scheduleFrame(callback) {
@@ -188,7 +211,8 @@ function progressController(elements, timers = []) {
     },
     clearTimer(timerId) {
       timers[timerId] = null;
-    }
+    },
+    ...options
   });
 }
 
@@ -229,6 +253,106 @@ assert.equal(calculateProgressPercent(25, 100), 25, "progress percent is calcula
 assert.equal(calculateProgressPercent(150, 100), 100, "progress percent is clamped at 100");
 assert.equal(calculateProgressPercent(-10, 100), 0, "progress percent is clamped at 0");
 assert.equal(calculateProgressPercent(10, 0), null, "zero total bytes does not produce a percent");
+assert.equal(chooseWebRChannel({
+  forcePostMessage: true,
+  managerStatus: "ready",
+  currentChannel: "SharedArrayBuffer",
+  supportedChannel: "SharedArrayBuffer"
+}), "PostMessage", "staged matrices can require PostMessage explicitly");
+assert.equal(chooseWebRChannel({
+  managerStatus: "ready",
+  currentChannel: "PostMessage",
+  supportedChannel: "SharedArrayBuffer"
+}), "PostMessage", "a ready compatibility runtime is reused instead of restarted");
+assert.equal(chooseWebRChannel({
+  managerStatus: "not-started",
+  currentChannel: "PostMessage",
+  supportedChannel: "SharedArrayBuffer"
+}), "SharedArrayBuffer", "a fresh manager uses the browser-supported default when not forced");
+
+{
+  const manager = new WebRManager();
+  const preparedRuntime = { id: "prepared-postmessage-runtime" };
+  manager.status = "ready";
+  manager.webR = preparedRuntime;
+  manager.channelType = "PostMessage";
+  assert.equal(
+    await manager.initialize(),
+    preparedRuntime,
+    "analysis reuses the PostMessage runtime completed during preparation"
+  );
+  assert.equal(
+    await manager.initialize({ forcePostMessage: true }),
+    preparedRuntime,
+    "staged matrix analysis does not restart an already prepared PostMessage runtime"
+  );
+}
+
+{
+  const managerFromAppUrl = await import("../js/webr-manager.js?v=20260727-defaults");
+  const managerFromRunnerUrl = await import("../js/webr-manager.js?v=20260727-defaults");
+  const managerFromAlternateUrl = await import("../js/webr-manager.js?v=singleton-alternate-test");
+  assert.equal(
+    managerFromAppUrl.webrManager,
+    webrManager,
+    "a versioned app import shares the prepared webR manager"
+  );
+  assert.equal(
+    managerFromRunnerUrl.webrManager,
+    webrManager,
+    "the unchanged runner import shares the prepared webR manager"
+  );
+  assert.equal(
+    managerFromAlternateUrl.webrManager,
+    webrManager,
+    "even an accidentally different module URL shares the prepared webR manager"
+  );
+
+  const originalStatus = webrManager.status;
+  const originalRuntime = webrManager.webR;
+  const originalChannel = webrManager.channelType;
+  const preparedRuntime = { id: "app-prepared-runtime" };
+  try {
+    webrManager.status = "ready";
+    webrManager.webR = preparedRuntime;
+    webrManager.channelType = "PostMessage";
+    assert.equal(
+      await managerFromRunnerUrl.webrManager.initialize({ forcePostMessage: true }),
+      preparedRuntime,
+      "the unchanged DEG runner receives the exact webR prepared by app.js"
+    );
+  } finally {
+    webrManager.status = originalStatus;
+    webrManager.webR = originalRuntime;
+    webrManager.channelType = originalChannel;
+  }
+}
+
+{
+  let readyStartCount = 0;
+  const result = runAfterDomReady({ readyState: "complete" }, () => {
+    readyStartCount += 1;
+  });
+  assert.equal(result, "started", "an app imported after DOMContentLoaded starts immediately");
+  assert.equal(readyStartCount, 1, "late dynamic import does not miss app initialization");
+
+  let listener = null;
+  let listenerOptions = null;
+  const loadingResult = runAfterDomReady({
+    readyState: "loading",
+    addEventListener(type, callback, options) {
+      assert.equal(type, "DOMContentLoaded");
+      listener = callback;
+      listenerOptions = options;
+    }
+  }, () => {
+    readyStartCount += 1;
+  });
+  assert.equal(loadingResult, "waiting", "an app imported during parsing waits for DOMContentLoaded");
+  assert.equal(listenerOptions?.once, true, "DOMContentLoaded startup listener only runs once");
+  listener();
+  assert.equal(readyStartCount, 2, "DOMContentLoaded starts an app imported during parsing");
+}
 
 {
   const elements = progressElements();
@@ -296,6 +420,14 @@ assert.equal(calculateProgressPercent(10, 0), null, "zero total bytes does not p
   });
   assert.equal(elements.percent.textContent, "Estimated progress: 60%", "sample loading percent follows loaded bytes when total bytes are known");
   assert.equal(elements.bytes.textContent, "70 B / 100 B", "sample loading keeps byte details visible");
+
+  controller.update(1, {
+    message: "Loading R package: DESeq2",
+    stage: "Loading R package: DESeq2",
+    mode: "determinate",
+    percent: 88
+  });
+  assert.equal(elements.percent.textContent, "Estimated progress: 88%", "explicit preparation progress is shown for custom stages");
 }
 
 {
@@ -314,6 +446,20 @@ assert.equal(calculateProgressPercent(10, 0), null, "zero total bytes does not p
   controller.start(12);
   timers.forEach((callback) => callback?.());
   assert.equal(elements.root.hidden, false, "old completion timer does not hide a new dataset load");
+}
+
+{
+  const elements = progressElements();
+  const timers = [];
+  const controller = progressController(elements, timers, {
+    hideOnComplete: false,
+    completeStage: "Analysis preparation complete"
+  });
+  controller.start(13);
+  controller.complete(13);
+  assert.equal(elements.label.textContent, "Analysis preparation complete", "preparation completion has a distinct label");
+  assert.equal(elements.root.hidden, false, "completed preparation stays visible");
+  assert.equal(timers.length, 0, "persistent completion does not schedule hiding");
 }
 
 {
@@ -657,14 +803,72 @@ assert.equal(RESULT_COLUMN_LABELS.control_tpm_median, "Control TPM median");
 assert.equal(RESULT_COLUMN_LABELS.treatment_tpm_median, "Treatment TPM median");
 assert.equal(RESULT_COLUMN_LABELS.arabidopsis_homolog, "Arabidopsis homolog");
 assert.equal(RESULT_COLUMN_LABELS.rice_homolog, "Rice homolog");
-assert.equal(APP_CONFIG.appVersion, "20260727");
+assert.equal(APP_CONFIG.appVersion, "20260810-shared-webr-manager");
+assert.match(indexHtml, /id="offlineStatus"/);
+assert.match(indexHtml, /id="localLaunchNotice"/);
+assert.match(indexHtml, /start-local\.cmd/);
+assert.match(indexHtml, /sh start-local\.sh/);
+assert.match(indexHtml, /id="datasetPreparationProgress"/);
+assert.match(indexHtml, /Analysis preparation/);
+assert.doesNotMatch(indexHtml, /<span class="status-label">Local analysis<\/span>/);
+assert.match(indexHtml, /app-bootstrap-20260810-shared-webr-manager\.js/);
+assert.match(appBootstrapSource, /20260810-shared-webr-manager-9/);
+assert.match(appBootstrapSource, /location\.reload\(\)/);
+assert.match(appSource, /runAfterDomReady\(document, startApp\)/);
+const initializeAppSource = appSource.slice(appSource.indexOf("async function initializeApp"));
+assert.ok(
+  initializeAppSource.indexOf("await loadDatasetsCatalog()") <
+    initializeAppSource.indexOf("await offlineSupportPromise"),
+  "dataset catalog loads independently before waiting for local analysis storage"
+);
+assert.match(localLaunchGuardSource, /window\.location\.protocol === "file:"/);
+assert.match(localLaunchGuardSource, /get\("mode"\) === "upload"/);
+assert.match(localPowerShellServerSource, /127\.0\.0\.1/);
+assert.match(localPowerShellServerSource, /Cross-Origin-Embedder-Policy: require-corp/);
+assert.match(localPythonServerSource, /ThreadingHTTPServer/);
+assert.match(localPythonServerSource, /LOCAL_HOST = "127\.0\.0\.1"/);
+assert.match(localPythonServerSource, /Cross-Origin-Embedder-Policy/);
+assert.match(localNodeServerSource, /server\.listen\(port, "127\.0\.0\.1"/);
+assert.match(localNodeServerSource, /Cross-Origin-Embedder-Policy/);
+assert.match(localShellLauncherSource, /command -v python3/);
+assert.match(localShellLauncherSource, /command -v node/);
+assert.match(appSource, /setAnalysisNetworkLock\(true\)/);
+assert.match(appSource, /prepareDatasetForOfflineAnalysis/);
+assert.match(appSource, /const preparedWebRChannel = "PostMessage"/);
+assert.match(appSource, /webrManager\.initialize\(\{ forcePostMessage: true \}\)/);
+const appManagerSpecifier = appSource.match(/from "(\.\/webr-manager\.js[^"]*)"/)?.[1];
+const runnerManagerSpecifier = runnerSource.match(/from "(\.\/webr-manager\.js[^"]*)"/)?.[1];
+assert.equal(appManagerSpecifier, runnerManagerSpecifier, "app and DEG runner import the same webR manager URL");
+const uploadHandlerSource = appSource.slice(
+  appSource.indexOf("async function handleUploadFile"),
+  appSource.indexOf("function estimateMemory")
+);
+assert.match(uploadHandlerSource, /await file\.arrayBuffer\(\)/);
+assert.doesNotMatch(uploadHandlerSource, /FormData|XMLHttpRequest/);
+assert.match(offlineSupportSource, /navigator\.storage\.persist\(\)/);
+assert.match(serviceWorkerSource, /Local analysis blocked an uncached network request/);
+assert.match(serviceWorkerSource, /SET_OFFLINE_ONLY/);
+assert.match(serviceWorkerSource, /app-bootstrap-20260810-shared-webr-manager\.js/);
+assert.doesNotMatch(serviceWorkerSource, /ignoreSearch/);
+const sharedArrayBufferAssets = getWebROfflineAssetUrls("SharedArrayBuffer");
+const postMessageAssets = getWebROfflineAssetUrls("PostMessage");
+assert.equal(sharedArrayBufferAssets.some((url) => url.includes("library-uncompressed.data")), true);
+assert.equal(sharedArrayBufferAssets.some((url) => url.includes("library.data.gz")), false);
+assert.equal(postMessageAssets.some((url) => url.includes("library.data.gz")), true);
+assert.equal(postMessageAssets.some((url) => url.includes("library-uncompressed.data")), false);
+for (const assetUrl of [...new Set([...sharedArrayBufferAssets, ...postMessageAssets])]) {
+  const localAsset = new URL(assetUrl);
+  localAsset.search = "";
+  assert.equal(fs.existsSync(localAsset), true, `offline runtime asset exists: ${localAsset.pathname}`);
+}
 assert.equal(DEFAULT_PARAMETERS.sfType, "ratio");
 assert.equal(DEFAULT_PARAMETERS.cooksCutoff, true);
 assert.match(indexHtml, /<option value="ratio" selected>ratio<\/option>/);
 assert.match(indexHtml, /<option value="true" selected>TRUE<\/option>/);
 assert.equal(DEFAULT_PARAMETERS.test, "Wald");
 assert.equal(Object.hasOwn(DEFAULT_PARAMETERS, "parallel"), false);
-assert.match(indexHtml, />Run DEG analysis<\/button>/);
+assert.match(indexHtml, /id="runDeseq2Button"[^>]*>[\s\S]*?run-button-title">Run DEG analysis<[\s\S]*?run-button-engine">DESeq2 \(standard\)</);
+assert.match(indexHtml, /id="runZTestButton"[^>]*>[\s\S]*?run-button-title">Run DEG analysis<[\s\S]*?run-button-engine">Pairwise Z-test \(for fast screening\)</);
 assert.match(indexHtml, />Stop analysis<\/button>/);
 assert.match(indexHtml, /STEP 1\.[\s\S]*?Select data/);
 assert.match(indexHtml, /STEP 2\.[\s\S]*?Select analysis design/);
@@ -674,9 +878,14 @@ assert.match(indexHtml, /id="controlSelector"[^>]*>[\s\S]*?STEP 3\. Select contr
 assert.match(indexHtml, /id="treatmentSelector"[^>]*>[\s\S]*?STEP 4\. Select treatment samples/);
 assert.match(indexHtml, /id="multiGroupSection"[\s\S]*?STEP 3\.[\s\S]*?Build multi-group comparison/);
 assert.match(indexHtml, /STEP 5\.[\s\S]*?Set analysis parameters/);
-assert.match(indexHtml, /id="analysisEngine"[\s\S]*?R \/ DESeq2 \(standard\)/);
-assert.match(indexHtml, /High-speed pairwise Z-test/);
-assert.match(indexHtml, /id="p-mode"[\s\S]*?FDR \(Benjamini-Hochberg\)/);
+assert.doesNotMatch(indexHtml, /Analysis Engine|id="analysisEngine"/);
+assert.doesNotMatch(indexHtml, /Correction mode|P-value correction mode|id="p-mode"/i);
+assert.match(indexHtml, /Low-expression pre-filtering \(DESeq2 only\)/);
+assert.match(indexHtml, /DESeq2 independent filtering \(DESeq2 only\)/);
+assert.match(indexHtml, /Fit type \(DESeq2 only\)/);
+assert.match(indexHtml, /Size-factor estimation \(DESeq2 only\)/);
+assert.match(indexHtml, /Cook's cutoff \(DESeq2 only\)/);
+assert.match(indexHtml, /Test \(DESeq2 only\)/);
 assert.match(indexHtml, /STEP 6\.[\s\S]*?Select plots/);
 assert.doesNotMatch(indexHtml, /DESeq2-normalized count boxplot/);
 assert.match(indexHtml, /Use a raw integer count matrix/);
@@ -706,6 +915,20 @@ assert.doesNotMatch(stagedRunnerSource, /parallel\s*=\s*FALSE/i);
 assert.match(runnerSource, /DESeq2::nbinomLRT/);
 assert.match(stagedRunnerSource, /DESeq2::nbinomLRT/);
 assert.match(appSource, /document\.querySelectorAll\("button, input, select"\)/);
+assert.match(appSource, /runSelectedAnalysis\(ANALYSIS_ENGINES\.DESEQ2\)/);
+assert.match(appSource, /runSelectedAnalysis\(ANALYSIS_ENGINES\.ZTEST\)/);
+assert.match(appSource, /runMultiGroupAnalysis\(engine\)/);
+assert.match(appSource, /runAnalysis\(engine\)/);
+assert.match(appSource, /if \(state\.analysisActive\) \{\s*return;\s*\}/);
+assert.match(appSource, /if \(engine === ANALYSIS_ENGINES\.ZTEST\) \{\s*return commonParameters;\s*\}/);
+assert.doesNotMatch(appSource, /selectedAnalysisEngine|analysisEngine|p-mode|pAdjustmentMode/);
+assert.doesNotMatch(fastZTestSource, /bonferroni|pAdjustmentMode|mode === "raw"/i);
+assert.match(fastZTestSource, /adjustPValuesBenjaminiHochberg/);
+assert.match(helpHtml, /The analysis engine is not selected in Step 5\./);
+assert.match(helpHtml, /Run DEG analysis R\/DESeq2 \(standard\)/);
+assert.match(helpHtml, /Run DEG analysis High speed pairwise Z-test \(ultrafast\)/);
+assert.match(helpHtml, /Multiple-testing correction is always Benjamini-Hochberg FDR/);
+assert.match(helpHtml, /Parameters labeled[\s\S]*?\(DESeq2 only\)[\s\S]*?do not affect High speed pairwise Z-test results\./);
 assert.match(appSource, /el\.analysisActivity\.hidden = true/);
 assert.match(appSource, /window\.location\.reload\(\)/);
 assert.match(appSource, /Building upload count matrix/);
@@ -737,6 +960,10 @@ assert.match(cssSource, /\.step-head h2\s*\{[^}]*font-size: 1\.6rem/s);
 assert.match(cssSource, /\[hidden\]\s*\{[^}]*display: none !important/s);
 assert.match(cssSource, /\.selector-heading h3\s*\{[^}]*font-size: 1\.6rem/s);
 assert.match(cssSource, /body\s*\{[^}]*font-size: 1rem/s);
+assert.match(cssSource, /\.run-engine-buttons\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,/s);
+assert.match(cssSource, /\.run-engine-buttons\s*\{[^}]*flex:\s*0 1 550px[^}]*width:\s*min\(100%,\s*550px\)/s);
+assert.match(cssSource, /\.run-engine-buttons button\s*\{[^}]*place-content:\s*center[^}]*min-height:\s*64px[^}]*text-align:\s*center/s);
+assert.match(cssSource, /@media \(max-width:\s*720px\)[\s\S]*?\.run-engine-buttons\s*\{[^}]*grid-template-columns:\s*1fr/s);
 
 const samples = JSON.parse(readFixture("gexa_samples_fixture.json")).samples;
 const leaf = samples.filter((row) => row.tissue === "leaf");
@@ -799,6 +1026,8 @@ for (const dataset of publishedCatalog.datasets) {
   assert.equal(dataset.annotationUrl, undefined);
   assert.equal(dataset.sampleMetadataUrl, undefined);
   assert.equal(dataset.geneListUrl, undefined);
+  assert.equal(dataset.countBaseUrl, undefined);
+  assert.equal(dataset.countVectorManifestUrl, undefined);
   assert.equal(dataset.tpmBaseUrl, undefined);
   assert.equal(dataset.tpmVectorManifestUrl, undefined);
   if (dataset.id === "rice") {
@@ -909,24 +1138,44 @@ const rawDataset = {
   annotationHasHeader: false,
   annotationColumns: ["gene_id", "arabidopsis_homolog", "rice_homolog"]
 };
+const rawDatasetFetchStart = fetchedUrls.length;
 const rawBundle = await loadDatasetBundle(rawDataset);
+const rawDatasetLoadFetches = fetchedUrls.slice(rawDatasetFetchStart);
 assert.equal(rawBundle.sampleRows.length, 6, "direct GExA-style sample row count");
 assert.equal(rawBundle.genes.length, 8, "direct GExA-style gene count");
 assert.deepEqual(rawBundle.genes.slice(0, 3), ["gene0001", "gene0002", "gene0003"]);
 assert.match(rawDataset.tpmVectorManifestUrl, /tpm-vectors\/manifest\.json$/);
 assert.equal(rawBundle.sampleRows[0].tpmFile, "000000.bin.gz", "TPM manifest maps sample IDs to vector files");
+assert.equal(
+  rawDatasetLoadFetches.includes(new URL(rawDataset.countUrl, appRoot).href),
+  false,
+  "dataset selection does not fetch the monolithic count matrix"
+);
 
 const selectedRawSamples = rawBundle.sampleRows.slice(0, 2);
+const selectedCountFetchStart = fetchedUrls.length;
 const rawCountVectors = await loadSelectedCountVectors(rawBundle, selectedRawSamples);
+const selectedCountFetches = fetchedUrls.slice(selectedCountFetchStart);
 assert.equal(rawCountVectors.get("control_1")[0], 100);
 assert.equal(rawCountVectors.get("control_2")[3], 480);
+assert.deepEqual(
+  selectedCountFetches.map((url) => url.split("/").pop()).sort(),
+  ["count.csv.gz"],
+  "selected count rows are streamed from the server CSV"
+);
 assert.equal(rawBundle.directMatrix.countText, null, "direct count matrix text cache is released after vector extraction");
 assert.equal(rawBundle.directMatrix.countRowsBySampleId.size, 0, "direct count row cache is released after vector extraction");
+const repeatCountFetchStart = fetchedUrls.length;
+const repeatedRawCountVectors = await loadSelectedCountVectors(rawBundle, selectedRawSamples);
+assert.equal(fetchedUrls.length, repeatCountFetchStart, "the same selected counts are reused without rescanning the CSV");
+repeatedRawCountVectors.clear();
+assert.equal(rawBundle.selectedCountVectorCache.size, 2, "clearing a runner map does not discard the selected-row cache");
 
-const decodedGzipBundle = await loadDatasetBundle({
+const decodedGzipDataset = {
   ...rawDataset,
   countUrl: `${rawDataset.countUrl}?decoded-gzip=1`
-});
+};
+const decodedGzipBundle = await loadDatasetBundle(decodedGzipDataset);
 const decodedGzipVectors = await loadSelectedCountVectors(decodedGzipBundle, selectedRawSamples);
 assert.equal(decodedGzipVectors.get("control_1")[0], 100, "server-decoded gzip count matrix is not decompressed twice");
 
@@ -1033,6 +1282,9 @@ delete csvOnlyDataset.tpmUrl;
 delete csvOnlyDataset.annotationUrl;
 delete csvOnlyDataset.sampleMetadataUrl;
 delete csvOnlyDataset.geneListUrl;
+delete csvOnlyDataset.countBaseUrl;
+delete csvOnlyDataset.countVectorManifestUrl;
+delete csvOnlyDataset.countVectorFormat;
 delete csvOnlyDataset.tpmBaseUrl;
 delete csvOnlyDataset.tpmVectorManifestUrl;
 delete csvOnlyDataset.tpmVectorFormat;
@@ -1183,21 +1435,37 @@ assert.ok(
     { id: "g3_vs_g2", numeratorId: "g3", denominatorId: "g2", numeratorLabel: "C", denominatorLabel: "B", label: "C vs B" }
   ];
 
+  const allPairwiseController = Object.create(MultiGroupController.prototype);
+  Object.assign(allPairwiseController, {
+    groups,
+    scope: "all_pairwise",
+    referenceId: "g1",
+    customContrasts: []
+  });
+  assert.deepEqual(
+    allPairwiseController.getContrasts().map((contrast) => contrast.label),
+    ["B vs A", "C vs A", "C vs B"],
+    "three-group all-pairwise mode uses later groups as numerators"
+  );
+  assert.match(
+    multiGroupControllerSource,
+    /this\.scope = "all_pairwise"/,
+    "multi-group comparison defaults to all pairwise contrasts"
+  );
+
   const directBvA = runPairwiseZTest({
     geneNames,
     vectorsMap,
     numeratorSamples: groups[1].samples,
     denominatorSamples: groups[0].samples,
-    parameters,
-    pAdjustmentMode: "fdr"
+    parameters
   });
   const multi = runMultiGroupFastAnalysis({
     geneNames,
     vectorsMap,
     groups,
     contrasts,
-    parameters,
-    pAdjustmentMode: "fdr"
+    parameters
   });
 
   assert.equal(MAX_MULTI_GROUP_CONTRASTS, 12, "multi-group contrast cap is exported");
@@ -1214,14 +1482,47 @@ assert.ok(
     Number(multi.contrasts[2].rows.find((row) => row.gene_id === "gene_up_b").log2FoldChange) < 0,
     "C vs B is negative for a B-up gene"
   );
+  assert.equal(
+    directBvA.resultRows.find((row) => row.gene_id === "gene_low").direction,
+    "Filtered / NA",
+    "ultrafast analysis applies the minimum total count filter"
+  );
+  const bhRows = directBvA.resultRows
+    .filter((row) => Number.isFinite(row.pvalue))
+    .slice()
+    .sort((a, b) => a.pvalue - b.pvalue);
+  let bhMinimum = 1;
+  const expectedBhByGene = new Map();
+  for (let index = bhRows.length - 1; index >= 0; index -= 1) {
+    bhMinimum = Math.min(bhMinimum, bhRows[index].pvalue * bhRows.length / (index + 1));
+    expectedBhByGene.set(bhRows[index].gene_id, Math.max(bhRows[index].pvalue, bhMinimum));
+  }
+  assert.deepEqual(
+    bhRows.map((row) => row.padj),
+    bhRows.map((row) => expectedBhByGene.get(row.gene_id)),
+    "ultrafast analysis applies Benjamini-Hochberg adjustment"
+  );
+
+  const legacyRawStateAttempt = runPairwiseZTest({
+    geneNames,
+    vectorsMap,
+    numeratorSamples: groups[1].samples,
+    denominatorSamples: groups[0].samples,
+    parameters,
+    pAdjustmentMode: "raw"
+  });
+  assert.deepEqual(
+    legacyRawStateAttempt.resultRows.map((row) => row.padj),
+    directBvA.resultRows.map((row) => row.padj),
+    "legacy correction state cannot bypass fixed Benjamini-Hochberg adjustment"
+  );
 
   const reversed = runMultiGroupFastAnalysis({
     geneNames,
     vectorsMap,
     groups,
     contrasts: contrasts.slice().reverse(),
-    parameters,
-    pAdjustmentMode: "fdr"
+    parameters
   });
   assert.deepEqual(
     reversed.contrasts.find((contrast) => contrast.id === "g2_vs_g1").rows,
@@ -1277,6 +1578,16 @@ assert.ok(
   });
   assert.equal(stagedStages.length, 9, "multi-group staged DESeq2 uses discrete R stages");
   assert.match(stagedStages.map(([, code]) => code).join("\n"), /readBin[\s\S]*nbinomLRT[\s\S]*nbinomWaldTest/);
+  assert.doesNotMatch(
+    multiGroupStagedRunnerSource,
+    /format\s*\(\s*Sys\.time\s*\(/,
+    "multi-group staged logging avoids webR clock-string conversion"
+  );
+  assert.doesNotMatch(
+    multiGroupRunnerSource,
+    /format\s*\(\s*Sys\.time\s*\(/,
+    "multi-group fallback logging avoids webR clock-string conversion"
+  );
 
   const directionMatrix = buildDirectionMatrix(multi.contrasts);
   assert.equal(directionMatrix.length, geneNames.length, "direction matrix has one row per gene");
@@ -1289,6 +1600,48 @@ assert.ok(
     { label: "C vs A Up", genes: upC }
   ]);
   assert.ok(intersections.some((entry) => entry.membership[0] && !entry.membership[1]), "exclusive intersections include set-specific genes");
+  assert.equal(
+    describeIntersectionMembership(
+      [{ label: "A vs Control Down" }, { label: "B vs Control Up" }, { label: "B vs Control Down" }],
+      [false, true, false]
+    ),
+    "B vs Control Up only",
+    "binary Venn membership is rendered as a human-readable set name"
+  );
+  assert.equal(
+    describeIntersectionMembership(
+      [{ label: "A vs Control Down" }, { label: "B vs Control Up" }, { label: "B vs Control Down" }],
+      [true, false, true]
+    ),
+    "A vs Control Down + B vs Control Down only (not in B vs Control Up)",
+    "multi-set Venn membership names included and excluded sets"
+  );
+  assert.match(multiGroupResultsSource, /title\.textContent = "Gene-set overlap visualizations"/);
+  assert.match(multiGroupResultsSource, /const MAX_OVERLAP_SETS = 12/);
+  assert.match(multiGroupResultsSource, /const MAX_EULER_SETS = 9/);
+  assert.match(multiGroupResultsSource, /title: "Euler diagram"/);
+  assert.match(multiGroupResultsSource, /title: "UpSet plot"/);
+  assert.match(multiGroupResultsSource, /Venn and Euler diagrams are not displayed for 10 or more comparisons/);
+  assert.match(multiGroupResultsSource, /intersections\.slice\(0, MAX_UPSET_INTERSECTIONS\)/);
+  assert.match(multiGroupResultsSource, /availableContrasts\.slice\(0, MAX_OVERLAP_SETS\)/);
+  assert.match(multiGroupResultsSource, /directionSelect\.value = "Up"/);
+  assert.match(multiGroupResultsSource, /directionSelect\.addEventListener\("change", renderOutput\)/);
+  assert.doesNotMatch(multiGroupResultsSource, /for \(const direction of \["Up", "Down"\]\)/);
+  assert.match(multiGroupResultsSource, /label: `\$\{contrast\.label\} \$\{direction\}`/);
+  assert.match(multiGroupResultsSource, /downloadSvg\.textContent = "SVG"/);
+  assert.match(multiGroupResultsSource, /downloadPng\.textContent = "PNG"/);
+  assert.match(multiGroupResultsSource, /downloadCsv\.textContent = "CSV"/);
+  assert.match(multiGroupResultsSource, /appendEulerExportLegend/);
+  assert.match(multiGroupResultsSource, /objectsToCsv\(rows, columns, \{ bom: true \}\)/);
+  assert.match(multiGroupResultsSource, /membership_pattern: `binary_\$\{entry\.key\}`/);
+  assert.match(multiGroupResultsSource, /const scale = 2/);
+  assert.match(multiGroupResultsSource, /venn_diagram_\$\{direction\.toLowerCase\(\)\}_genes/);
+  assert.match(multiGroupResultsSource, /euler_diagram_\$\{direction\.toLowerCase\(\)\}_genes/);
+  assert.match(multiGroupResultsSource, /upset_plot_\$\{direction\.toLowerCase\(\)\}_genes/);
+  assert.doesNotMatch(multiGroupResultsSource, /textContent = `\$\{entry\.key\}:/);
+  assert.match(cssSource, /\.venn-svg[\s\S]*?min-width:\s*900px/);
+  assert.match(cssSource, /\.euler-svg/);
+  assert.match(cssSource, /\.upset-svg/);
 }
 
 console.log("unit tests passed");

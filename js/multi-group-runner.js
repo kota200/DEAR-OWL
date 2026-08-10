@@ -1,4 +1,4 @@
-import { APP_CONFIG } from "./config.js?v=20260727-defaults";
+import { APP_CONFIG } from "./config.js?v=20260806";
 import {
   formatError,
   parseCsvObjects
@@ -13,7 +13,7 @@ import {
 import {
   cleanupStagedMultiGroupDeseq2,
   runStagedMultiGroupDeseq2
-} from "./multi-group-staged-runner.js?v=20260727-defaults";
+} from "./multi-group-staged-runner.js?v=20260806-webr-log";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -153,7 +153,7 @@ export function buildMultiGroupDeseq2RunnerCode({
 
   return `
     writeLines(
-      paste(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "0. Multi-group R job file started"),
+      "0. Multi-group R job file started",
       con = ${rString(logPath)},
       useBytes = TRUE
     )
@@ -161,10 +161,7 @@ export function buildMultiGroupDeseq2RunnerCode({
     run_browser_deseq2_multi_group_app <- function() {
       logs <- readLines(${rString(logPath)}, warn = FALSE)
       add_log <- function(message) {
-        logs <<- c(
-          logs,
-          paste(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), message)
-        )
+        logs <<- c(logs, as.character(message))
         write_log()
         progress_token <- getOption("browser_deseq2_progress_token", "")
         if (

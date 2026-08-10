@@ -65,10 +65,9 @@ export class MultiGroupController {
     this.rows = [];
     this.groups = Array.from({ length: MIN_GROUPS }, (_, index) => newGroup(index));
     this.activeGroupId = this.groups[0].id;
-    this.scope = "reference_vs_all";
+    this.scope = "all_pairwise";
     this.referenceId = this.groups[0].id;
     this.runGlobal = true;
-    this.engine = "deseq2";
     this.customContrasts = [];
     this.renderShell();
   }
@@ -138,11 +137,6 @@ export class MultiGroupController {
     this.renderGroups();
     this.renderContrastControls();
     this.emitChange();
-  }
-
-  setEngine(engine) {
-    this.engine = engine;
-    this.renderContrastControls();
   }
 
   activeGroup() {
@@ -323,24 +317,15 @@ export class MultiGroupController {
     const globalCheckbox = document.createElement("input");
     globalCheckbox.type = "checkbox";
     globalCheckbox.checked = this.runGlobal;
-    globalCheckbox.disabled = this.engine === "javascript";
     globalCheckbox.addEventListener("change", () => {
       this.runGlobal = globalCheckbox.checked;
       this.emitChange();
     });
-    globalLabel.append(globalCheckbox, document.createTextNode(" Run global LRT"));
-    globalLabel.hidden = this.engine === "javascript";
+    globalLabel.append(globalCheckbox, document.createTextNode(" Run global LRT (DESeq2 only)"));
 
     controls.append(referenceLabel, scopeLabel, globalLabel);
 
     this.contrastPanel.append(title, controls);
-
-    if (this.engine === "javascript") {
-      const note = document.createElement("p");
-      note.className = "manual-note compact-note";
-      note.textContent = "Ultrafast pairwise Z-test runs selected contrasts only. No global test is performed.";
-      this.contrastPanel.append(note);
-    }
 
     if (this.scope === "custom") {
       this.contrastPanel.append(this.renderCustomContrastEditor());
@@ -497,7 +482,7 @@ export class MultiGroupController {
     return contrasts;
   }
 
-  validate({ plots = {}, parameters = {} } = {}) {
+  validate({ plots = {}, parameters = {}, engine = "deseq2" } = {}) {
     const errors = [];
     const warnings = [];
     const groups = this.getGroups();
@@ -545,7 +530,7 @@ export class MultiGroupController {
       warnings.push("Caution: Samples from different BioProjects may contain strong batch effects. Whenever possible, compare groups within the same BioProject.");
     }
 
-    if (this.engine === "javascript") {
+    if (engine === "ztest") {
       warnings.push("Ultrafast pairwise Z-test does not run a global/omnibus test.");
     } else {
       if (allSamples.length > 30 && (plots.pca || plots.sampleCorrelation || plots.sampleDistance)) {
@@ -568,7 +553,7 @@ export class MultiGroupController {
       warnings,
       groups,
       contrasts,
-      runGlobal: this.engine === "javascript" ? false : this.runGlobal,
+      runGlobal: engine === "ztest" ? false : this.runGlobal,
       totalSamples: allSamples.length,
       bioProjects
     };

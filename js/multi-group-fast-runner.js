@@ -1,4 +1,4 @@
-import { runPairwiseZTest } from "./fast-ztest.js";
+import { runPairwiseZTest } from "./fast-ztest.js?v=20260810-bh";
 import { buildDirectionMatrix } from "./intersections.js";
 
 export function runMultiGroupFastAnalysis({
@@ -7,7 +7,6 @@ export function runMultiGroupFastAnalysis({
   groups,
   contrasts,
   parameters,
-  pAdjustmentMode = "fdr",
   inputGeneCount = geneNames.length
 }) {
   const startedAt = performance.now();
@@ -28,7 +27,6 @@ export function runMultiGroupFastAnalysis({
       numeratorSamples: numerator.samples,
       denominatorSamples: denominator.samples,
       parameters,
-      pAdjustmentMode,
       inputGeneCount
     });
 
@@ -69,7 +67,7 @@ export function runMultiGroupFastAnalysis({
       "[JS FAST ENGINE REPORT]",
       "Ultrafast pairwise Z-test completed.",
       `Contrasts: ${contrastResults.length}`,
-      "Benjamini-Hochberg, Bonferroni, or raw p-value handling is applied separately within each pairwise comparison.",
+      "Benjamini-Hochberg FDR adjustment is applied separately within each pairwise comparison.",
       "No global/omnibus test is performed by the ultrafast engine."
     ].join("\n")
   };
