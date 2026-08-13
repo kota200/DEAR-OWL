@@ -11,13 +11,17 @@
     content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
   >
   <title>DEAR-OWL</title>
-  <link rel="stylesheet" href="./css/deseq-app.css?v=20260810-shared-prefilter">
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260813-header-layout-5">
 </head>
 <body>
   <header class="site-header">
-    <div>
-      <h1>DEAR-OWL</h1>
-      <p>Differential Expression Analysis Resource on the Web (Lite)</p>
+    <span class="site-dna-mark" aria-hidden="true">🧬</span>
+    <div class="site-brand-lockup">
+      <div class="site-brand">
+        <h1>DEAR-OWL</h1>
+        <p>Differential Expression Analysis Resource on the Web (Lite)</p>
+      </div>
+      <img class="site-owl-mark" src="./dear-owl.png" alt="">
     </div>
     <nav aria-label="Primary">
       <a href="./index.html" aria-current="page">Home</a>
@@ -52,7 +56,7 @@
       </div>
       <div>
         <span class="status-label">Runtime</span>
-        <strong id="runtimeStatus">App 20260810-shared-prefilter | webR not started</strong>
+        <strong id="runtimeStatus">App 20260810 | webR not started</strong>
       </div>
     </section>
 
@@ -73,7 +77,7 @@
       </div>
 
       <div id="gexaPanel" class="data-panel">
-        <label for="datasetSelect">Dataset</label>
+        <label for="datasetSelect">GExA dataset (<a href="https://www.gexa.anesc.u-tokyo.ac.jp/">https://www.gexa.anesc.u-tokyo.ac.jp/</a>)</label>
         <select id="datasetSelect"></select>
         <div id="datasetInfo" class="dataset-info">Loading dataset catalog...</div>
         <div id="datasetLoadProgress" class="dataset-load-progress" hidden>

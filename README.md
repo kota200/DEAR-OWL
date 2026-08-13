@@ -1,5 +1,9 @@
 # DEAR-OWL
 
+<p align="center">
+  <img src="./dear-owl.png" alt="DEAR-OWL owl mark" width="220">
+</p>
+
 **DEAR-OWL (Differential Expression Analysis Resource on the Web, Lite)** is a
 browser-based application for differential gene expression analysis of plant
 RNA-seq count data. It can be used in two ways:
