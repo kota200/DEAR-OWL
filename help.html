@@ -11,13 +11,17 @@
     content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
   >
   <title>Help | DEAR-OWL</title>
-  <link rel="stylesheet" href="./css/deseq-app.css?v=20260810-run-buttons">
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260813-header-layout-5">
 </head>
 <body class="help-page">
   <header class="site-header">
-    <div>
-      <h1>DEAR-OWL</h1>
-      <p>Analyze differential gene expression from GExA-style datasets or uploaded count matrices.</p>
+    <span class="site-dna-mark" aria-hidden="true">🧬</span>
+    <div class="site-brand-lockup">
+      <div class="site-brand">
+        <h1>DEAR-OWL</h1>
+        <p>Differential Expression Analysis Resource on the Web (Lite)</p>
+      </div>
+      <img class="site-owl-mark" src="./dear-owl.png" alt="">
     </div>
     <nav aria-label="Primary">
       <a href="./index.html">Home</a>
@@ -55,7 +59,7 @@
         <h2>Requirements</h2>
       </div>
       <ul class="manual-list">
-        <li><strong>Input data</strong>: Select a GExA dataset or upload a raw count matrix. The first column should contain gene IDs. The remaining columns should contain sample counts.</li>
+        <li><strong>Input data</strong>: Select a <a href="https://www.gexa.anesc.u-tokyo.ac.jp/">GExA</a> dataset or upload a raw count matrix. The first column should contain gene IDs. The remaining columns should contain sample counts.</li>
         <li><strong>GExA loading</strong>: Dataset selection streams the external count CSV once and stores its compressed response in the browser. The <strong>Data loading</strong> bar covers this transfer and metadata scan. Only sample metadata and gene order remain in memory; selected count rows are extracted from the cached CSV later.</li>
         <li><strong>Analysis preparation</strong>: After data loading reaches 100%, a separate bar reports browser storage, PostMessage-compatible webR and DESeq2 startup, R package loading, and final file verification. DEG analysis becomes available only after this second bar completes, and reuses the same ready runtime without starting webR again.</li>
         <li><strong>Uploaded files</strong>: Uploaded count matrices stay inside the browser and are not sent to the application server.</li>
