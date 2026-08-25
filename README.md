@@ -195,6 +195,12 @@ samples can help on memory-limited systems.
 - [Deployment](wiki/Deployment.md)
 - [Development and validation](wiki/Development.md)
 
+## License
+
+The original DEAR-OWL code and documentation are available under the [MIT License](LICENSE).
+Bundled third-party runtimes and packages, including webR, R, and Bioconductor
+packages, remain subject to their respective licenses.
+
 ## Deployment summary
 
 Deploy the complete repository to the web directory. On Apache-compatible

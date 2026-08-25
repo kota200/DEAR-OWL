@@ -1379,6 +1379,15 @@ tbody tr:hover {
   background: #f4f9fd;
 }
 
+.citation-details {
+  display: grid;
+  gap: 4px;
+}
+
+.citation-details p {
+  margin: 0;
+}
+
 @media (max-width: 980px) {
   .status-strip,
   .parameter-grid,
