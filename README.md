@@ -221,5 +221,7 @@ checks, and the release checklist.
 
 ## Citation
 DEAR-OWL: a fully browser-based hybrid resource for instant or precise differential gene expression analysis
+
 Kota Kambara, Sintho Wahyuning Ardie, Daisuke Tsugama
+
 bioRxiv 2026.07.28.741369; doi: https://doi.org/10.64898/2026.07.28.741369
