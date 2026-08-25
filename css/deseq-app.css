@@ -1388,6 +1388,54 @@ tbody tr:hover {
   margin: 0;
 }
 
+.example-use-intro {
+  margin-top: 0;
+}
+
+.example-steps {
+  display: grid;
+  gap: 28px;
+}
+
+.example-step {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}
+
+.example-step:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.example-step h3 {
+  margin: 0 0 6px;
+  color: var(--header);
+  font-size: 1.2rem;
+}
+
+.example-step p {
+  margin: 0;
+}
+
+.example-step figure {
+  margin: 12px 0 0;
+}
+
+.example-step img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.example-step figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
 @media (max-width: 980px) {
   .status-strip,
   .parameter-grid,
