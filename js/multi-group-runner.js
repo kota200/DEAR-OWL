@@ -3,13 +3,13 @@ import {
   formatError,
   parseCsvObjects
 } from "./utils.js";
-import { webrManager } from "./webr-manager.js?v=20260727-defaults";
+import { webrManager } from "./webr-manager.js?v=20260825-webr-vfs-cache";
 import { buildDirectionMatrix } from "./intersections.js";
 import {
   encodeGeneIdLines,
   encodeInt32LittleEndian,
   isWebRBridgeError
-} from "./deseq-runner.js?v=20260727-defaults";
+} from "./deseq-runner.js?v=20260826-staged-pairwise";
 import {
   cleanupStagedMultiGroupDeseq2,
   runStagedMultiGroupDeseq2

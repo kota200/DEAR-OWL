@@ -50,6 +50,7 @@ assert.match(runnerSource, /evalRVoid/);
 assert.match(runnerSource, /evalRBoolean/);
 assert.match(runnerSource, /scriptPath/);
 assert.match(runnerSource, /PREFLIGHT_OK/);
+assert.doesNotMatch(runnerSource, /format\s*\(\s*Sys\.time\s*\(/);
 assert.match(runnerSource, /BOOTSTRAP_ERROR/);
 assert.doesNotMatch(runnerSource, /webR\.writeConsole\(/);
 assert.doesNotMatch(stagedRunnerSource, /webR\.writeConsole\(/);

@@ -12,7 +12,7 @@
     content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self';"
   >
   <title>Help | DEAR-OWL</title>
-  <link rel="stylesheet" href="./css/deseq-app.css?v=20260813-header-layout-5">
+  <link rel="stylesheet" href="./css/deseq-app.css?v=20260825-help-example-1">
 </head>
 <body class="help-page">
   <header class="site-header">
@@ -52,6 +52,7 @@
         <li><a href="#parameters">Set analysis parameters</a></li>
         <li><a href="#results">Results and downloads</a></li>
         <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#example-of-use">Example of use</a></li>
         <li><a href="#citation">Citation</a></li>
       </ol>
     </section>
@@ -293,7 +294,60 @@
         <li><strong>Too many DEG are detected</strong>: Check for batch effects or mixed biological conditions between the two groups.</li>
         <li><strong>The browser is slow</strong>: Reduce the number of selected samples, disable PCA and heatmap plots, close other tabs, or reload the page.</li>
       </ul>
-      <p class="manual-note"><a href="./index.html">Back to DEAR-OWL</a></p>
+    </section>
+
+    <section id="example-of-use" class="step-card">
+      <div class="step-head">
+        <h2>Example of Use</h2>
+      </div>
+      <p class="example-use-intro">This example shows a two-group comparison using a GExA dataset. Select samples from one BioProject and use the displayed metadata to keep the comparison biologically consistent.</p>
+
+      <div class="example-steps">
+        <article class="example-step">
+          <h3>1. Select and load a dataset</h3>
+          <p>Choose <strong>GExA dataset</strong> or <strong>Upload count matrix</strong>. For a GExA analysis, select a dataset from the list and wait until data loading and analysis preparation are complete.</p>
+          <figure>
+            <img src="./help1.png" alt="Selecting a dataset type, choosing a GExA dataset, and waiting for loading to complete">
+            <figcaption>Choose the data source, select a dataset, and wait for preparation to finish before continuing.</figcaption>
+          </figure>
+        </article>
+
+        <article class="example-step">
+          <h3>2. Choose the design and control samples</h3>
+          <p>Select <strong>Two-group comparison</strong> for a control-versus-treatment analysis. Use the keyword search and metadata filters to find suitable control samples, then select at least two samples from the same BioProject.</p>
+          <figure>
+            <img src="./help2.png" alt="Choosing a two-group comparison and filtering the control sample table">
+            <figcaption>Search by keywords, BioProject, tissue, treatment, or cultivar to identify comparable control samples.</figcaption>
+          </figure>
+        </article>
+
+        <article class="example-step">
+          <h3>3. Select treatment samples</h3>
+          <p>After choosing the control group, select at least two treatment samples from the same BioProject. Check the treatment, tissue, developmental stage, cultivar, and other metadata before proceeding.</p>
+          <figure>
+            <img src="./help3.png" alt="Selected control samples and the treatment sample selection table">
+            <figcaption>The selected control and treatment samples should represent comparable conditions except for the treatment of interest.</figcaption>
+          </figure>
+        </article>
+
+        <article class="example-step">
+          <h3>4. Set parameters and run the analysis</h3>
+          <p>Start with the default parameter settings. Run <strong>DESeq2</strong> for the standard analysis, or use the <strong>Pairwise Z-test</strong> for fast screening. If browser resources are limited, setting Cook's cutoff to <strong>FALSE</strong> may help.</p>
+          <figure>
+            <img src="./help4.png" alt="Analysis parameters, plot options, and the DESeq2 and Pairwise Z-test run buttons">
+            <figcaption>Review the settings and optional plots before starting the selected analysis method.</figcaption>
+          </figure>
+        </article>
+
+        <article class="example-step">
+          <h3>5. Review and download results</h3>
+          <p>Review the run summary, result table, MA plot, and volcano plot. Filter the table by adjusted p-value or effect size as needed, then download the result files that support your follow-up analysis.</p>
+          <figure>
+            <img src="./help5.png" alt="Run summary, analysis results for all genes, MA and volcano plots, and download buttons">
+            <figcaption>Use the result table and plots to interpret the analysis, then download results, normalized counts, selected samples, or analysis settings.</figcaption>
+          </figure>
+        </article>
+      </div>
     </section>
 
     <section id="citation" class="step-card">

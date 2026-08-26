@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DEAR-OWL two-group T2T-size browser smoke test</title>
+  <style>
+    body {
+      color: #17202a;
+      font: 16px/1.5 system-ui, sans-serif;
+      margin: 2rem auto;
+      max-width: 70rem;
+      padding: 0 1rem;
+    }
+
+    pre {
+      background: #f3f5f7;
+      border: 1px solid #cbd3da;
+      min-height: 8rem;
+      overflow: auto;
+      padding: 1rem;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>DEAR-OWL two-group T2T-size browser smoke test</h1>
+  <p id="status">Starting</p>
+  <pre id="output"></pre>
+
+  <script type="module">
+    import {
+      buildBinaryCountMatrixFromVectors,
+      runDeseqAnalysis
+    } from "../js/deseq-runner.js?v=20260826-staged-pairwise";
+
+    const status = document.querySelector("#status");
+    const output = document.querySelector("#output");
+    const geneCount = 43310;
+    const geneIds = Array.from(
+      { length: geneCount },
+      (_, index) => `Seita.${String(index + 1).padStart(5, "0")}`
+    );
+    const sampleIds = ["Control_1", "Control_2", "Treatment_1", "Treatment_2"];
+    const samples = sampleIds.map((sampleId) => ({ sample_id: sampleId }));
+    const vectors = new Map();
+
+    sampleIds.forEach((sampleId, sampleIndex) => {
+      const treatment = sampleIndex >= 2;
+      const replicate = sampleIndex % 2;
+      vectors.set(sampleId, Int32Array.from(geneIds, (_, geneIndex) => {
+        const base = 20 + ((geneIndex * 17) % 180);
+        const effect = treatment && geneIndex < 9000 ? 2.4 : 1;
+        const replicateEffect = replicate === 0 ? 0.94 : 1.06;
+        return Math.max(
+          1,
+          Math.round(base * effect * replicateEffect + ((geneIndex + sampleIndex) % 7))
+        );
+      }));
+    });
+
+    const countMatrix = buildBinaryCountMatrixFromVectors(geneIds, samples, vectors);
+    const colDataCsv = [
+      "sample,group",
+      "Control_1,control",
+      "Control_2,control",
+      "Treatment_1,treatment",
+      "Treatment_2,treatment"
+    ].join("\n");
+
+    try {
+      const result = await runDeseqAnalysis({
+        countCsv: null,
+        countMatrix,
+        colDataCsv,
+        parameters: {
+          minimumCount: 5,
+          preFiltering: true,
+          sfType: "ratio",
+          fitType: "parametric",
+          cooksCutoff: true,
+          fdrThreshold: 0.05,
+          independentFiltering: true,
+          test: "Wald"
+        },
+        plots: {
+          dispersion: false,
+          pca: false,
+          sampleCorrelation: false,
+          sampleDistance: false
+        },
+        onProgress(message) {
+          status.textContent = message;
+        }
+      });
+
+      const checks = {
+        inputGenes: countMatrix.geneCount,
+        selectedSamples: countMatrix.sampleCount,
+        resultRows: result.resultRows.length,
+        sizeFactorCount: result.sizeFactors.length,
+        stagedExecution: result.summary.staged_execution,
+        jsPrefiltering: result.summary.js_prefiltering,
+        appVersion: result.summary.appVersion,
+        webRChannel: result.summary.channelType
+      };
+      const passed =
+        checks.inputGenes === geneCount &&
+        checks.selectedSamples === 4 &&
+        checks.resultRows === geneCount &&
+        checks.sizeFactorCount === 4 &&
+        checks.stagedExecution === "TRUE" &&
+        checks.jsPrefiltering === "TRUE" &&
+        checks.webRChannel === "PostMessage";
+
+      if (!passed) {
+        throw new Error(`Unexpected smoke-test output:\n${JSON.stringify(checks, null, 2)}`);
+      }
+
+      status.textContent = "PASS";
+      output.textContent = JSON.stringify(checks, null, 2);
+    } catch (error) {
+      status.textContent = "FAIL";
+      output.textContent = error?.stack || error?.message || String(error);
+    }
+  </script>
+</body>
+</html>

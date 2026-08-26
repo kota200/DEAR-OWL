@@ -1,6 +1,6 @@
 export const APP_CONFIG = {
-  appVersion: "20260810-shared-prefilter",
-  datasetCatalogUrl: "./config/datasets.json?v=20260717-gene-length",
+  appVersion: "20260826-staged-pairwise",
+  datasetCatalogUrl: "./config/datasets.json",
   externalDataBaseUrl: "/RNADB/Download/files/",
   defaultPageSize: 100,
   maxPlotPoints: 50000,

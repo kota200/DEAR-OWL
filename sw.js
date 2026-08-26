@@ -1,4 +1,4 @@
-const CACHE_VERSION = "20260810-shared-prefilter-10";
+const CACHE_VERSION = "20260826-staged-pairwise-1";
 const CACHE_PREFIX = "dear-owl-local-";
 const STATIC_CACHE = `${CACHE_PREFIX}static-${CACHE_VERSION}`;
 const DATA_CACHE = `${CACHE_PREFIX}data-${CACHE_VERSION}`;
@@ -7,6 +7,11 @@ const APP_SHELL = [
   "./",
   "./index.html",
   "./help.html",
+  "./help1.png",
+  "./help2.png",
+  "./help3.png",
+  "./help4.png",
+  "./help5.png",
   "./css/deseq-app.css",
   "./config/datasets.json",
   "./js/app.js",
@@ -72,9 +77,9 @@ async function matchCached(request) {
   const names = [cacheNameForUrl(new URL(request.url)), STATIC_CACHE, DATA_CACHE];
   for (const name of [...new Set(names)]) {
     const cache = await caches.open(name);
-    const exact = await cache.match(request);
-    if (exact) {
-      return exact;
+    const cached = await cache.match(request);
+    if (cached) {
+      return cached;
     }
   }
   return null;
@@ -125,6 +130,28 @@ async function cacheFirst(request) {
   const response = await fetch(request);
   cacheNetworkResponse(request, response);
   return response;
+}
+
+function isDatasetCatalogUrl(url) {
+  const catalogUrl = new URL("./config/datasets.json", self.location.href);
+  return url.origin === catalogUrl.origin && url.pathname === catalogUrl.pathname;
+}
+
+async function datasetCatalogResponse(request) {
+  if (await networkIsLocked()) {
+    return await cacheFirst(request);
+  }
+
+  try {
+    const response = await fetch(request, { cache: "no-store" });
+    if (cacheable(response)) {
+      cacheNetworkResponse(request, response);
+      return response;
+    }
+    return await matchCached(request) || response;
+  } catch (error) {
+    return await matchCached(request) || Promise.reject(error);
+  }
 }
 
 async function navigationResponse(request) {
@@ -199,7 +226,9 @@ self.addEventListener("fetch", (event) => {
   const responsePromise =
     request.mode === "navigate"
       ? navigationResponse(request)
-      : cacheFirst(request);
+      : isDatasetCatalogUrl(url)
+        ? datasetCatalogResponse(request)
+        : cacheFirst(request);
   event.respondWith(responsePromise);
   event.waitUntil((async () => {
     try {
@@ -212,26 +241,36 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function cacheUrls(urls) {
+  const uniqueUrls = [...new Set(urls)].map((value) => new URL(value, self.location.href));
+  let nextIndex = 0;
   let cached = 0;
-  for (const value of urls) {
-    const url = new URL(value, self.location.href);
+
+  for (const url of uniqueUrls) {
     if (url.origin !== self.location.origin) {
       throw new Error(`Refusing to cache a cross-origin analysis file: ${url.href}`);
     }
-    const request = new Request(url.href, { credentials: "same-origin" });
-    const existing = await matchCached(request);
-    if (existing) {
-      cached += 1;
-      continue;
-    }
-    const response = await fetch(request);
-    if (!response.ok) {
-      throw new Error(`Failed to cache ${url.href}: HTTP ${response.status}`);
-    }
-    const cache = await caches.open(cacheNameForUrl(url));
-    await cache.put(request, response);
-    cached += 1;
   }
+
+  const cacheNextUrl = async () => {
+    while (nextIndex < uniqueUrls.length) {
+      const url = uniqueUrls[nextIndex];
+      nextIndex += 1;
+      const request = new Request(url.href, { credentials: "same-origin" });
+      const existing = await matchCached(request);
+      if (!existing) {
+        const response = await fetch(request);
+        if (!response.ok) {
+          throw new Error(`Failed to cache ${url.href}: HTTP ${response.status}`);
+        }
+        const cache = await caches.open(cacheNameForUrl(url));
+        await cache.put(request, response);
+      }
+      cached += 1;
+    }
+  };
+
+  const workerCount = Math.min(6, uniqueUrls.length);
+  await Promise.all(Array.from({ length: workerCount }, () => cacheNextUrl()));
   return cached;
 }
 

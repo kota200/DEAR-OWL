@@ -46,6 +46,7 @@ const handlers = new Map();
 const cacheMap = new Map();
 const liveClients = [{ id: "client-1" }];
 let networkCalls = 0;
+let networkUnavailable = false;
 
 const cacheStorage = {
   async open(name) {
@@ -83,6 +84,9 @@ const context = vm.createContext({
   caches: cacheStorage,
   fetch: async (request) => {
     networkCalls += 1;
+    if (networkUnavailable) {
+      throw new Error("Network unavailable");
+    }
     return new Response(`network:${requestUrl(request)}`, { status: 200 });
   }
 });
@@ -158,5 +162,53 @@ assert.equal(message.enabled, false);
 response = await dispatchFetch(uncachedUrl);
 assert.equal(response.status, 200);
 assert.equal(networkCalls, 2, "network access resumes after analysis");
+
+const catalogUrl = "https://example.test/deseq2_local/config/datasets.json";
+const catalogNetworkStart = networkCalls;
+response = await dispatchFetch(catalogUrl);
+assert.equal(response.status, 200);
+assert.equal(networkCalls, catalogNetworkStart + 1);
+
+response = await dispatchFetch(catalogUrl);
+assert.equal(response.status, 200);
+assert.equal(
+  networkCalls,
+  catalogNetworkStart + 2,
+  "the dataset catalog checks the network even when a cached copy exists"
+);
+
+networkUnavailable = true;
+response = await dispatchFetch(catalogUrl);
+assert.equal(response.status, 200, "the cached dataset catalog remains available offline");
+assert.equal(
+  await response.text(),
+  `network:${catalogUrl}`,
+  "the last successful catalog is used when the network fails"
+);
+networkUnavailable = false;
+
+const lazyRuntimeUrls = [
+  "https://example.test/deseq2_local/webr/vfs/usr/lib/R/library/parallel.js.metadata",
+  "https://example.test/deseq2_local/webr/vfs/usr/lib/R/library/parallel.data.gz"
+];
+const lazyRuntimeNetworkStart = networkCalls;
+message = await dispatchMessage({ type: "CACHE_URLS", urls: lazyRuntimeUrls });
+assert.equal(message.ok, true);
+assert.equal(message.cached, lazyRuntimeUrls.length);
+assert.equal(networkCalls, lazyRuntimeNetworkStart + lazyRuntimeUrls.length);
+
+message = await dispatchMessage({ type: "SET_OFFLINE_ONLY", enabled: true });
+assert.equal(message.ok, true);
+const lockedRuntimeNetworkStart = networkCalls;
+for (const url of lazyRuntimeUrls) {
+  response = await dispatchFetch(url);
+  assert.equal(response.status, 200, "a cached lazy webR filesystem asset remains available while locked");
+}
+assert.equal(
+  networkCalls,
+  lockedRuntimeNetworkStart,
+  "webR lazy filesystem images never require network access during analysis"
+);
+await dispatchMessage({ type: "SET_OFFLINE_ONLY", enabled: false });
 
 console.log("offline service worker tests passed");
