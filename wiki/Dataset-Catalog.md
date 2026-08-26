@@ -19,6 +19,12 @@ copy GExA matrices into the DEAR-OWL repository.
 The browser cannot list an arbitrary server directory, so the JSON catalog is
 loaded first. It is small and supplies the dataset dropdown.
 
+When the app is online, the catalog is requested from the server before using
+the cached fallback. After this catalog behavior has been deployed once,
+routine dataset additions and metadata changes require updating only the
+external data files and `config/datasets.json`; they do not require an app or
+Service Worker version change.
+
 When a dataset is selected:
 
 1. Only the selected dataset's compressed count matrix is requested.

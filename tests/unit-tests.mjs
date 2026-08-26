@@ -87,6 +87,7 @@ const multiGroupControllerSource = fs.readFileSync(new URL("../js/multi-group-co
 const multiGroupResultsSource = fs.readFileSync(new URL("../js/multi-group-results.js", import.meta.url), "utf8");
 const offlineSupportSource = fs.readFileSync(new URL("../js/offline-support.js", import.meta.url), "utf8");
 const serviceWorkerSource = fs.readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+const webRRuntimeSource = fs.readFileSync(new URL("../webr/R.js", import.meta.url), "utf8");
 const appBootstrapSource = fs.readFileSync(new URL("../js/app-bootstrap-20260810-shared-webr-manager.js", import.meta.url), "utf8");
 const localLaunchGuardSource = fs.readFileSync(new URL("../js/local-launch-guard.js", import.meta.url), "utf8");
 const localPowerShellServerSource = fs.readFileSync(new URL("../scripts/serve-local.ps1", import.meta.url), "utf8");
@@ -803,7 +804,7 @@ assert.equal(RESULT_COLUMN_LABELS.control_tpm_median, "Control TPM median");
 assert.equal(RESULT_COLUMN_LABELS.treatment_tpm_median, "Treatment TPM median");
 assert.equal(RESULT_COLUMN_LABELS.arabidopsis_homolog, "Arabidopsis homolog");
 assert.equal(RESULT_COLUMN_LABELS.rice_homolog, "Rice homolog");
-assert.equal(APP_CONFIG.appVersion, "20260810-shared-prefilter");
+assert.equal(APP_CONFIG.appVersion, "20260826-staged-pairwise");
 assert.match(indexHtml, /id="offlineStatus"/);
 assert.match(indexHtml, /id="localLaunchNotice"/);
 assert.match(indexHtml, /start-local\.cmd/);
@@ -812,7 +813,9 @@ assert.match(indexHtml, /id="datasetPreparationProgress"/);
 assert.match(indexHtml, /Analysis preparation/);
 assert.doesNotMatch(indexHtml, /<span class="status-label">Local analysis<\/span>/);
 assert.match(indexHtml, /app-bootstrap-20260810-shared-webr-manager\.js/);
-assert.match(appBootstrapSource, /20260810-shared-prefilter-10/);
+assert.match(indexHtml, /app-bootstrap-20260810-shared-webr-manager\.js\?v=20260826-staged-pairwise/);
+assert.match(appBootstrapSource, /20260826-staged-pairwise-1/);
+assert.equal(APP_CONFIG.datasetCatalogUrl, "./config/datasets.json");
 assert.match(appBootstrapSource, /location\.reload\(\)/);
 assert.match(appSource, /runAfterDomReady\(document, startApp\)/);
 const initializeAppSource = appSource.slice(appSource.indexOf("async function initializeApp"));
@@ -834,6 +837,9 @@ assert.match(localShellLauncherSource, /command -v python3/);
 assert.match(localShellLauncherSource, /command -v node/);
 assert.match(appSource, /setAnalysisNetworkLock\(true\)/);
 assert.match(appSource, /prepareDatasetForOfflineAnalysis/);
+assert.doesNotMatch(appSource, /useLargeMatrixPath|buildCountCsvFromVectors/);
+assert.match(appSource, /Building memory-safe count matrix/);
+assert.match(appSource, /countMatrix = buildBinaryCountMatrixFromVectors/);
 assert.match(appSource, /const preparedWebRChannel = "PostMessage"/);
 assert.match(appSource, /webrManager\.initialize\(\{ forcePostMessage: true \}\)/);
 const appManagerSpecifier = appSource.match(/from "(\.\/webr-manager\.js[^"]*)"/)?.[1];
@@ -856,6 +862,29 @@ assert.equal(sharedArrayBufferAssets.some((url) => url.includes("library-uncompr
 assert.equal(sharedArrayBufferAssets.some((url) => url.includes("library.data.gz")), false);
 assert.equal(postMessageAssets.some((url) => url.includes("library.data.gz")), true);
 assert.equal(postMessageAssets.some((url) => url.includes("library-uncompressed.data")), false);
+const lazyFilePaths = [...webRRuntimeSource.matchAll(
+  /loadFile\(\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'([^']+)'/g
+)].map((match) => match[1]);
+const lazyImagePaths = [...webRRuntimeSource.matchAll(
+  /loadImage\(\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'([^']+)'/g
+)].map((match) => match[1]);
+const lazyRuntimePaths = [
+  ...lazyFilePaths,
+  ...lazyImagePaths,
+  ...lazyImagePaths.map((path) => path.replace(/\.data(?:\.gz)?$/, ".js.metadata"))
+];
+assert.ok(lazyFilePaths.length > 0, "webR lazy files were discovered from R.js");
+assert.ok(lazyImagePaths.length > 0, "webR filesystem images were discovered from R.js");
+for (const runtimeAssets of [sharedArrayBufferAssets, postMessageAssets]) {
+  for (const relativePath of lazyRuntimePaths) {
+    const matchingUrl = runtimeAssets.find((assetUrl) => {
+      const pathname = decodeURIComponent(new URL(assetUrl).pathname).replaceAll("\\", "/");
+      return pathname.endsWith(`/webr/${relativePath}`);
+    });
+    assert.ok(matchingUrl, `offline runtime includes webR lazy asset: ${relativePath}`);
+    assert.equal(new URL(matchingUrl).search, "", `webR lazy asset uses its exact worker URL: ${relativePath}`);
+  }
+}
 for (const assetUrl of [...new Set([...sharedArrayBufferAssets, ...postMessageAssets])]) {
   const localAsset = new URL(assetUrl);
   localAsset.search = "";
@@ -980,10 +1009,11 @@ assert.notDeepEqual(geneOrderA, geneOrderC, "gene order mismatch check");
 
 const publishedCatalog = JSON.parse(fs.readFileSync(new URL("../config/datasets.json", import.meta.url), "utf8"));
 assert.equal(publishedCatalog.datasets.some((dataset) => dataset.id === "example"), false);
-assert.equal(publishedCatalog.datasets.length, 9);
+assert.equal(publishedCatalog.datasets.length, 10);
 const expectedGexaTemplates = new Map([
   ["barley", "https://webpark2116.sakura.ne.jp/RNADB/HV/HV.html?gene={gene}"],
   ["finger_millet", "https://webpark2116.sakura.ne.jp/RNADB/EC/EC.html?gene={gene}"],
+  ["foxtail_millet__t2t", "https://webpark2116.sakura.ne.jp/RNADB/SI_T2T/SI_T2T.html?gene={gene}"],
   ["foxtail_millet", "https://webpark2116.sakura.ne.jp/RNADB/SI/SI.html?gene={gene}"],
   ["pearl_millet__06777R", "https://webpark2116.sakura.ne.jp/RNADB/PM_06777R/PM_06777R.html"],
   ["pearl_millet__843B", "https://webpark2116.sakura.ne.jp/RNADB/PM_843B/PM_843B.html"],
@@ -995,6 +1025,7 @@ const expectedGexaTemplates = new Map([
 const expectedReferenceDisplays = new Map([
   ["barley", "Morex (Navr\u00e1tilov\u00e1 et al. 2022)"],
   ["finger_millet", "KNE796-S (Devos et al. 2023)"],
+  ["foxtail_millet__t2t", "Yugu1 (T2T) (He et al. 2024; http://www.setariadb.com/)"],
   ["foxtail_millet", "Yugu1 (Bennetzen et al. 2012)"],
   ["pearl_millet__06777R", "06777R (Ramu et al. 2023)"],
   ["pearl_millet__843B", "843B (Ramu et al. 2023)"],
@@ -1006,6 +1037,7 @@ const expectedReferenceDisplays = new Map([
 const expectedExternalFiles = new Map([
   ["barley", ["Barley_count_data.csv.gz", "Barley_TPM_data.csv.gz", "Barley_gene_length.tsv", "Barley_annotation.tsv"]],
   ["finger_millet", ["Finger_millet_count_data.csv.gz", "Finger_millet_TPM_data.csv.gz", "Finger_millet_gene_length.tsv", "Finger_millet_annotation.tsv"]],
+  ["foxtail_millet__t2t", ["Foxtail_millet_T2T_count_data.csv.gz", "Foxtail_millet_T2T_TPM_data.csv.gz", "Foxtail_millet_T2T_gene_length.tsv", "Foxtail_millet_T2T_annotation.tsv"]],
   ["foxtail_millet", ["Foxtail_millet_count_data.csv.gz", "Foxtail_millet_TPM_data.csv.gz", "Foxtail_millet_gene_length.tsv", "Foxtail_millet_annotation.tsv"]],
   ["pearl_millet__06777R", ["Pearl_millet_count_data_cv_06777R.csv.gz", "Pearl_millet_TPM_data_cv_06777R.csv.gz", "Pearl_millet_gene_length_cv_06777R.tsv", "Pearl_millet_annotation_cv_06777R.tsv"]],
   ["pearl_millet__843B", ["Pearl_millet_count_data_cv_843B.csv.gz", "Pearl_millet_TPM_data_cv_843B.csv.gz", "Pearl_millet_gene_length_cv_843B.tsv", "Pearl_millet_annotation_cv_843B.tsv"]],

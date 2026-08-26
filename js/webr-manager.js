@@ -51,6 +51,78 @@ const PACKAGES_TO_LOAD = [
   "DESeq2"
 ];
 
+// R.js creates these files lazily. They must be present in Cache Storage
+// before analysis enables the offline-only network lock, otherwise a later
+// DESeq2 code path can fail inside the worker while trying to mount an
+// Emscripten filesystem image.
+const WEBR_LAZY_FILE_PATHS = [
+  "vfs/usr/lib/R/library/translations/DESCRIPTION",
+  "vfs/etc/ssl/cert.pem",
+  "vfs/etc/fonts/fonts.conf",
+  "vfs/usr/share/fonts/NotoSans-Bold.ttf",
+  "vfs/usr/share/fonts/NotoSans-BoldItalic.ttf",
+  "vfs/usr/share/fonts/NotoSans-Italic.ttf",
+  "vfs/usr/share/fonts/NotoSans-Regular.ttf",
+  "vfs/usr/share/fonts/NotoSansMono-Bold.ttf",
+  "vfs/usr/share/fonts/NotoSansMono-Regular.ttf",
+  "vfs/usr/share/fonts/NotoSerif-Bold.ttf",
+  "vfs/usr/share/fonts/NotoSerif-BoldItalic.ttf",
+  "vfs/usr/share/fonts/NotoSerif-Italic.ttf",
+  "vfs/usr/share/fonts/NotoSerif-Regular.ttf",
+  "vfs/var/cache/fontconfig/3830d5c3ddfd5cd38a049b759396e72e-le32d8.cache-9",
+  "vfs/var/cache/fontconfig/CACHEDIR.TAG"
+];
+
+const WEBR_LAZY_IMAGE_PATHS = [
+  "vfs/usr/lib/R/doc.data.gz",
+  "vfs/usr/lib/R/library/base/demo.data.gz",
+  "vfs/usr/lib/R/library/base/help.data.gz",
+  "vfs/usr/lib/R/library/base/html.data.gz",
+  "vfs/usr/lib/R/library/compiler/help.data.gz",
+  "vfs/usr/lib/R/library/compiler/html.data.gz",
+  "vfs/usr/lib/R/library/datasets/help.data.gz",
+  "vfs/usr/lib/R/library/datasets/html.data.gz",
+  "vfs/usr/lib/R/library/graphics/demo.data.gz",
+  "vfs/usr/lib/R/library/graphics/help.data.gz",
+  "vfs/usr/lib/R/library/graphics/html.data.gz",
+  "vfs/usr/lib/R/library/grDevices/afm.data.gz",
+  "vfs/usr/lib/R/library/grDevices/demo.data.gz",
+  "vfs/usr/lib/R/library/grDevices/enc.data.gz",
+  "vfs/usr/lib/R/library/grDevices/fonts.data.gz",
+  "vfs/usr/lib/R/library/grDevices/help.data.gz",
+  "vfs/usr/lib/R/library/grDevices/html.data.gz",
+  "vfs/usr/lib/R/library/grDevices/libs.data.gz",
+  "vfs/usr/lib/R/library/grid/doc.data.gz",
+  "vfs/usr/lib/R/library/grid/help.data.gz",
+  "vfs/usr/lib/R/library/grid/html.data.gz",
+  "vfs/usr/lib/R/library/methods/help.data.gz",
+  "vfs/usr/lib/R/library/methods/html.data.gz",
+  "vfs/usr/lib/R/library/parallel.data.gz",
+  "vfs/usr/lib/R/library/splines/help.data.gz",
+  "vfs/usr/lib/R/library/splines/html.data.gz",
+  "vfs/usr/lib/R/library/stats/demo.data.gz",
+  "vfs/usr/lib/R/library/stats/doc.data.gz",
+  "vfs/usr/lib/R/library/stats/help.data.gz",
+  "vfs/usr/lib/R/library/stats/html.data.gz",
+  "vfs/usr/lib/R/library/stats4/help.data.gz",
+  "vfs/usr/lib/R/library/stats4/html.data.gz",
+  "vfs/usr/lib/R/library/tcltk.data.gz",
+  "vfs/usr/lib/R/library/tools/help.data.gz",
+  "vfs/usr/lib/R/library/tools/html.data.gz",
+  "vfs/usr/lib/R/library/tools/misc.data.gz",
+  "vfs/usr/lib/R/library/translations.data.gz",
+  "vfs/usr/lib/R/library/utils/doc.data.gz",
+  "vfs/usr/lib/R/library/utils/help.data.gz",
+  "vfs/usr/lib/R/library/utils/html.data.gz",
+  "vfs/usr/lib/R/library/utils/misc.data.gz",
+  "vfs/usr/lib/R/library/webr/help.data.gz",
+  "vfs/usr/lib/R/library/webr/html.data.gz",
+  "vfs/usr/lib/R/share.data.gz",
+  "vfs/usr/share/gdal.data.gz",
+  "vfs/usr/share/proj.data.gz",
+  "vfs/usr/share/udunits.data.gz"
+];
+
 export function getWebRChannelSupport(runtime = globalThis) {
   const crossOriginIsolated = runtime.crossOriginIsolated === true;
   const sharedArrayBufferAvailable = typeof runtime.SharedArrayBuffer === "function";
@@ -123,10 +195,18 @@ export function getWebROfflineAssetUrls(channelType = getWebRChannelSupport().ch
     new URL("libRblas.so", baseUrl).href,
     new URL("libRlapack.so", baseUrl).href
   ];
+  const lazyFilesystemUrls = [
+    ...WEBR_LAZY_FILE_PATHS.map((path) => new URL(path, baseUrl).href),
+    ...WEBR_LAZY_IMAGE_PATHS.flatMap((path) => [
+      new URL(path, baseUrl).href,
+      new URL(path.replace(/\.data(?:\.gz)?$/, ".js.metadata"), baseUrl).href
+    ])
+  ];
 
   if (channelType === "SharedArrayBuffer") {
     return [
       ...commonUrls,
+      ...lazyFilesystemUrls,
       versionedUrl(WEBR_CONFIG.workerLibraryDataUrl, WEBR_CONFIG.libraryVersion),
       versionedUrl(workerLibraryMetadataUrl, WEBR_CONFIG.libraryVersion)
     ];
@@ -134,6 +214,7 @@ export function getWebROfflineAssetUrls(channelType = getWebRChannelSupport().ch
 
   return [
     ...commonUrls,
+    ...lazyFilesystemUrls,
     versionedUrl(WEBR_CONFIG.libraryDataUrl, WEBR_CONFIG.libraryVersion),
     versionedUrl(WEBR_CONFIG.libraryMetadataUrl, WEBR_CONFIG.libraryVersion)
   ];

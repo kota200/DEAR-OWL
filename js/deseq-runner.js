@@ -1,5 +1,5 @@
-import { APP_CONFIG } from "./config.js?v=20260717-gene-length";
-import { webrManager } from "./webr-manager.js?v=20260727-defaults";
+import { APP_CONFIG } from "./config.js?v=20260826-staged-pairwise";
+import { webrManager } from "./webr-manager.js?v=20260825-webr-vfs-cache";
 import {
   cleanupStagedDeseq2,
   runStagedDeseq2
@@ -481,7 +481,7 @@ export function buildDeseq2RunnerCode({
 
   return `
     writeLines(
-      paste(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "0. R job file started"),
+      "0. R job file started",
       con = ${rString(logPath)},
       useBytes = TRUE
     )
@@ -489,16 +489,7 @@ export function buildDeseq2RunnerCode({
     run_browser_deseq2_app <- function() {
       logs <- readLines(${rString(logPath)}, warn = FALSE)
       add_log <- function(message) {
-        logs <<- c(
-          logs,
-          paste(
-            format(
-              Sys.time(),
-              "%Y-%m-%d %H:%M:%S"
-            ),
-            message
-          )
-        )
+        logs <<- c(logs, as.character(message))
         write_log()
         progress_token <- getOption(
           "browser_deseq2_progress_token",

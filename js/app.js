@@ -2,10 +2,9 @@ import {
   APP_CONFIG,
   DEFAULT_PARAMETERS,
   DEFAULT_PLOTS
-} from "./config.js?v=20260810-shared-prefilter";
+} from "./config.js?v=20260826-staged-pairwise";
 import {
   buildColDataCsv,
-  buildCountCsvFromVectors,
   loadAnnotations,
   loadDatasetBundle,
   loadDatasetsCatalog,
@@ -19,14 +18,14 @@ import {
   buildBinaryCountMatrixFromUpload,
   buildBinaryCountMatrixFromVectors,
   runDeseqAnalysis
-} from "./deseq-runner.js?v=20260727-defaults";
+} from "./deseq-runner.js?v=20260826-staged-pairwise";
 import { runPairwiseZTest } from "./fast-ztest.js?v=20260810-shared-prefilter";
 import {
   buildGroupedColDataCsv,
   MultiGroupController
 } from "./multi-group-controller.js?v=20260810-button-engine";
 import { runMultiGroupFastAnalysis } from "./multi-group-fast-runner.js?v=20260810-shared-prefilter";
-import { runMultiGroupDeseqAnalysis } from "./multi-group-runner.js?v=20260806-webr-log";
+import { runMultiGroupDeseqAnalysis } from "./multi-group-runner.js?v=20260826-staged-pairwise";
 import {
   addGroupedTpmAndAnnotations,
   enrichMultiGroupResult,
@@ -38,14 +37,14 @@ import { SampleSelector } from "./sample-selector.js";
 import {
   getWebROfflineAssetUrls,
   webrManager
-} from "./webr-manager.js?v=20260727-defaults";
+} from "./webr-manager.js?v=20260825-webr-vfs-cache";
 import {
   cacheOfflineUrls,
   initializeOfflineSupport,
   selectOfflineDataset,
   setAnalysisNetworkLock,
   waitForOfflineCacheIdle
-} from "./offline-support.js?v=20260810-shared-webr-manager";
+} from "./offline-support.js?v=20260826-staged-pairwise";
 import {
   classifyDirection,
   countBy,
@@ -1550,10 +1549,8 @@ async function runAnalysis(engine) {
         inputGeneCount
       });
     } else {
-      let countCsv;
       let countMatrix;
       const colDataCsv = buildColDataCsv(selected.control, selected.treatment);
-      const useLargeMatrixPath = allSamples.length >= 6 && inputGeneCount >= 25000;
 
       if (state.mode === "gexa") {
         const vectors = await loadSelectedCountVectors(state.bundle, allSamples, setProgress);
@@ -1571,23 +1568,19 @@ async function runAnalysis(engine) {
         if (state.cancelled) {
           throw new Error("Analysis was cancelled before DESeq2 started.");
         }
-        if (useLargeMatrixPath) {
-          setProgress("Building memory-safe count matrix");
-          countMatrix = buildBinaryCountMatrixFromVectors(
-            state.bundle.genes,
-            allSamples,
-            vectors
-          );
-        } else {
-          countCsv = buildCountCsvFromVectors(state.bundle.genes, allSamples, vectors);
-        }
+        setProgress("Building memory-safe count matrix");
+        countMatrix = buildBinaryCountMatrixFromVectors(
+          state.bundle.genes,
+          allSamples,
+          vectors
+        );
       } else {
         setProgress("Building upload count matrix");
         countMatrix = buildBinaryCountMatrixFromUpload(state.uploaded, allSamples);
       }
 
       result = await runDeseqAnalysis({
-        countCsv,
+        countCsv: null,
         countMatrix,
         colDataCsv,
         parameters,
