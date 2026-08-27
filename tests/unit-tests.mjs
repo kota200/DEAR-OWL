@@ -1023,7 +1023,7 @@ const expectedGexaTemplates = new Map([
   ["sorghum", "https://webpark2116.sakura.ne.jp/RNADB/SB/SB.html?gene={gene}"]
 ]);
 const expectedReferenceDisplays = new Map([
-  ["barley", "Morex (Navr\u00e1tilov\u00e1 et al. 2022)"],
+  ["barley", "Morex (Mascher et al. 2021)"],
   ["finger_millet", "KNE796-S (Devos et al. 2023)"],
   ["foxtail_millet__t2t", "Yugu1 (T2T) (He et al. 2024; http://www.setariadb.com/)"],
   ["foxtail_millet", "Yugu1 (Bennetzen et al. 2012)"],
