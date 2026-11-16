@@ -137,7 +137,7 @@ export function csvEscape(value, { protectFormula = true } = {}) {
 
   let text = String(value);
 
-  if (protectFormula && /^[=+\-@]/.test(text)) {
+  if (protectFormula && text.startsWith("=")) {
     text = "'" + text;
   }
 
